@@ -1,8 +1,8 @@
 // sales.js - Sales Dashboard functionality for DaxSilog POS System
 
-import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
-import { getFirestore, collection, query, where, orderBy, limit, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
-import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
+import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getFirestore, collection, query, where, orderBy, limit, getDocs, doc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 
 // Firebase configuration - same as in script.js
 const firebaseConfig = {
@@ -40,13 +40,14 @@ const auth = getAuth(app);
 
 // Configure Firestore for better offline handling
 try {
-    db.settings({
-        cacheSizeBytes: 50000000, // 50 MB
-        ignoreUndefinedProperties: true,
-    });
-} catch (error) {
-    console.warn("Could not configure Firestore settings:", error);
-}
+    if (typeof db.settings === 'function') {
+        db.settings({
+            cacheSizeBytes: 50000000, // 50 MB
+            ignoreUndefinedProperties: true,
+            experimentalForceLongPolling: true
+        });
+    }
+} catch (_) { /* no-op */ }
 
 // DOM elements
 const dateFromInput = document.getElementById('date-from');
@@ -62,6 +63,10 @@ const receiptViewNumber = document.getElementById('receipt-view-number');
 
 // Set up Chart.js
 let salesChart;
+// Track active real-time subscription
+let unsubscribeSales = null;
+// Debounce timer for chart updates to avoid thrashing on rapid snapshots
+let chartUpdateTimer = null;
 
 // Network status monitoring
 function updateNetworkStatus() {
@@ -79,14 +84,22 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('offline', updateNetworkStatus);
     updateNetworkStatus();
 
-    // Set default date range (last 7 days)
+    // Set default date range (last 7 days); ensure "To" is today
     const today = new Date();
-    dateToInput.valueAsDate = today;
-    
+    const todayStr = formatLocalDate(today);
     const weekAgo = new Date();
     weekAgo.setDate(today.getDate() - 7);
-    dateFromInput.valueAsDate = weekAgo;
-    
+    const weekAgoStr = formatLocalDate(weekAgo);
+
+    if (dateToInput) {
+        dateToInput.value = todayStr; // force To to current day to avoid timezone drift
+        dateToInput.max = todayStr;   // prevent selecting future dates
+    }
+    if (dateFromInput) {
+        dateFromInput.value = weekAgoStr;
+        dateFromInput.max = todayStr;
+    }
+
     // Make sure chart elements are in the right state before initialization
     const chartLoading = document.getElementById('chart-loading');
     const chartEmpty = document.getElementById('chart-empty');
@@ -101,10 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
         initializeSalesChart();
     }, 100);
     
-    // Load sales data with a slight delay
-    setTimeout(() => {
-        loadSalesData();
-    }, 200);
+    // Do NOT load data yet; wait for auth state to be ready
 
     // Set up event listeners
     setupEventListeners();
@@ -118,22 +128,21 @@ function checkAuthState() {
     onAuthStateChanged(auth, (user) => {
         const signinLink = document.getElementById('signin-link');
         const logoutBtn = document.getElementById('logout-btn');
+        const logoutBtnDesktop = document.getElementById('logout-btn-desktop');
 
         if (user) {
             // User is signed in
             if (signinLink) signinLink.classList.add('hidden');
-            if (logoutBtn) {
-                logoutBtn.classList.remove('hidden');
-                logoutBtn.addEventListener('click', () => {
-                    auth.signOut().then(() => {
-                        window.location.href = 'login.html';
-                    });
-                });
-            }
+            if (logoutBtn) logoutBtn.classList.remove('hidden');
+            if (logoutBtnDesktop) logoutBtnDesktop.classList.remove('hidden');
+
+            // Now that auth is available, load sales data (real-time)
+            loadSalesData();
         } else {
             // User is signed out
             if (signinLink) signinLink.classList.remove('hidden');
             if (logoutBtn) logoutBtn.classList.add('hidden');
+            if (logoutBtnDesktop) logoutBtnDesktop.classList.add('hidden');
         }
     });
 }
@@ -142,8 +151,13 @@ function checkAuthState() {
 function setupEventListeners() {
     // Date filter
     applyDateFilterBtn.addEventListener('click', () => {
+        // Ensure To is today if blank
+        if (!dateToInput.value) {
+            dateToInput.value = formatLocalDate(new Date());
+        }
+        // Resubscribe with new date range
         loadSalesData();
-        updateSalesChart();
+        // Chart will be updated by snapshot; no need to call separately
     });
 
     // Export sales
@@ -165,6 +179,14 @@ function setupEventListeners() {
     
     // Print receipt
     printReceiptBtn.addEventListener('click', printReceipt);
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+        if (typeof unsubscribeSales === 'function') {
+            unsubscribeSales();
+            unsubscribeSales = null;
+        }
+    });
 }
 
 // Initialize sales chart
@@ -233,8 +255,7 @@ function initializeSalesChart() {
 
 // Update sales chart with new data
 function updateSalesChart(salesData = []) {
-    const fromDate = new Date(dateFromInput.value);
-    const toDate = new Date(dateToInput.value);
+    const { from: fromDate, to: toDate } = getDateRange();
     
     // Show loading indicator and hide other elements
     const chartLoading = document.getElementById('chart-loading');
@@ -335,7 +356,7 @@ function renderSalesTable(salesData) {
             '<span class="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-xs font-medium">Cash</span>';
         
         row.innerHTML = `
-            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800">${sale.id}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800">${sale.receiptNumber || sale.id}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${formattedDate}</td>
             <td class="px-6 py-4 text-sm text-gray-500">${itemsText}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${sale.cashier || sale.attendant || 'N/A'}</td>
@@ -447,13 +468,30 @@ function updateSalesSummary(salesData) {
     }
 }
 
-// Load sales data from Firebase
+// Helpers: parse YYYY-MM-DD from <input type="date"> as local dates
+function parseLocalDate(dateStr) {
+    if (!dateStr) return null;
+    const [y, m, d] = dateStr.split('-').map(n => parseInt(n, 10));
+    if (!y || !m || !d) return null;
+    return new Date(y, m - 1, d, 0, 0, 0, 0); // local midnight
+}
+function formatLocalDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+function getDateRange() {
+    const from = parseLocalDate(dateFromInput.value) || new Date();
+    const to = parseLocalDate(dateToInput.value) || new Date();
+    to.setHours(23, 59, 59, 999);
+    return { from, to };
+}
+
+// Load sales data from Firebase (real-time)
 async function loadSalesData() {
     try {
-        const fromDate = new Date(dateFromInput.value);
-        const toDate = new Date(dateToInput.value);
-        toDate.setHours(23, 59, 59, 999);
-
+        const { from: fromDate, to: toDate } = getDateRange();
         // Reset table to loading state
         const tableSalesBody = document.getElementById('sales-table-body');
         if (tableSalesBody) {
@@ -490,7 +528,13 @@ async function loadSalesData() {
             `;
         }
 
-        let salesData = [];
+        // If there is an existing subscription, unsubscribe first
+        if (typeof unsubscribeSales === 'function') {
+            unsubscribeSales();
+            unsubscribeSales = null;
+        }
+
+        // Build query and subscribe in real-time
         const salesQuery = query(
             collection(db, "sales"),
             where("timestamp", ">=", fromDate),
@@ -499,13 +543,47 @@ async function loadSalesData() {
             limit(50)
         );
 
-        const salesSnapshot = await getDocs(salesQuery);
-        salesSnapshot.forEach((d) => salesData.push({ id: d.id, ...d.data() }));
+        let firstEmissionHandled = false;
+        // Fallback: if no snapshot within 2500ms, do a one-time fetch to display data
+        let fallbackTimer = setTimeout(() => {
+            if (!firstEmissionHandled) {
+                loadSalesDataOnce(fromDate, toDate);
+            }
+        }, 2500);
 
-        // Render strictly from DB; if no data, show empties
-        renderSalesTable(salesData);
-        updateSalesSummary(salesData);
-        setTimeout(() => updateSalesChart(salesData), 100);
+        unsubscribeSales = onSnapshot(salesQuery, (snapshot) => {
+            const salesData = [];
+            snapshot.forEach((d) => salesData.push({ id: d.id, ...d.data() }));
+
+            // Render strictly from DB snapshot
+            renderSalesTable(salesData);
+            updateSalesSummary(salesData);
+            // Debounce chart update slightly
+            if (chartUpdateTimer) clearTimeout(chartUpdateTimer);
+            chartUpdateTimer = setTimeout(() => updateSalesChart(salesData), 150);
+
+            // Hide loading states on first emission
+            if (!firstEmissionHandled) {
+                firstEmissionHandled = true;
+                clearTimeout(fallbackTimer);
+                if (chartLoading) chartLoading.classList.add('hidden');
+                if (salesData.length === 0) {
+                    if (chartEmpty) chartEmpty.classList.remove('hidden');
+                    if (salesChartCanvas) salesChartCanvas.classList.add('hidden');
+                    if (tableSalesBody) {
+                        tableSalesBody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-gray-500">No sales data found for the selected period.</td></tr>';
+                    }
+                } else {
+                    if (chartEmpty) chartEmpty.classList.add('hidden');
+                    if (salesChartCanvas) salesChartCanvas.classList.remove('hidden');
+                }
+            }
+        }, (error) => {
+            console.error("Error subscribing to sales data:", error);
+            // Attempt one-time fetch on error
+            loadSalesDataOnce(fromDate, toDate);
+            // ...existing error handling...
+        });
 
     } catch (error) {
         console.error("Error loading sales data:", error);
@@ -534,9 +612,50 @@ async function loadSalesData() {
     }
 }
 
+// One-time load as a fallback when RT listener is unavailable
+async function loadSalesDataOnce(fromDate, toDate) {
+    try {
+        const range = { from: fromDate, to: toDate };
+        if (!range.from || !range.to) {
+            const r = getDateRange();
+            range.from = r.from; range.to = r.to;
+        }
+        const salesQueryRef = query(
+            collection(db, "sales"),
+            where("timestamp", ">=", range.from),
+            where("timestamp", "<=", range.to),
+            orderBy("timestamp", "desc"),
+            limit(50)
+        );
+        const snap = await getDocs(salesQueryRef);
+        const salesData = [];
+        snap.forEach(d => salesData.push({ id: d.id, ...d.data() }));
+
+        renderSalesTable(salesData);
+        updateSalesSummary(salesData);
+        setTimeout(() => updateSalesChart(salesData), 100);
+
+        const chartLoading = document.getElementById('chart-loading');
+        const chartEmpty = document.getElementById('chart-empty');
+        const salesChartCanvas = document.getElementById('sales-chart');
+        if (chartLoading) chartLoading.classList.add('hidden');
+        if (salesData.length === 0) {
+            if (chartEmpty) chartEmpty.classList.remove('hidden');
+            if (salesChartCanvas) salesChartCanvas.classList.add('hidden');
+        } else {
+            if (chartEmpty) chartEmpty.classList.add('hidden');
+            if (salesChartCanvas) salesChartCanvas.classList.remove('hidden');
+        }
+    } catch (e) {
+        console.error('Fallback sales fetch failed:', e);
+    }
+}
+
 // View receipt details strictly from DB/table data
 async function viewReceiptDetails(receiptId, saleData = null) {
-    receiptViewNumber.textContent = `Receipt #${receiptId}`;
+    if (typeof receiptViewNumber !== 'undefined' && receiptViewNumber) {
+        receiptViewNumber.textContent = `Receipt #${receiptId}`;
+    }
 
     let sale = saleData;
     if (!sale) {
@@ -556,79 +675,79 @@ async function viewReceiptDetails(receiptId, saleData = null) {
     }
 
     const paymentMethod = (sale.paymentMethod || 'cash').toLowerCase();
-    const paymentMethodDisplay = document.getElementById('receipt-payment-method');
-    if (paymentMethod === 'cash') {
-        paymentMethodDisplay.innerHTML = '<span class="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-xs font-medium">Cash</span>';
-    } else {
-        paymentMethodDisplay.innerHTML = '<span class="px-2 py-1 bg-green-50 text-green-700 rounded-md text-xs font-medium">GCash</span>';
-    }
 
     const ts = sale.timestamp instanceof Date ? sale.timestamp : new Date(sale.timestamp?.seconds ? sale.timestamp.seconds * 1000 : sale.timestamp || Date.now());
 
+    // Header (simplified): keep date/receipt/attendant only, match POS layout
     let receiptHTML = `
-        <div class="mb-4 pb-3 border-b border-gray-200">
-            <div class="text-center mb-3">
-                <h3 class="text-lg font-bold">DaxSilog</h3>
-            </div>
-            <div class="text-xs">
-                <div class="flex justify-between"><span>Receipt #:</span><span>${sale.id}</span></div>
-                <div class="flex justify-between"><span>Date:</span><span>${ts.toLocaleString()}</span></div>
-                <div class="flex justify-between"><span>Attendant:</span><span>${sale.cashier || sale.attendant || 'N/A'}</span></div>
-            </div>
+        <div class="text-center border-b border-gray-300 pb-3 mb-3">
+            <p class="text-xs text-gray-500">${ts.toLocaleString()}</p>
+            <p class="text-xs text-gray-500">Receipt #: ${sale.receiptNumber || sale.id}</p>
+            <p class="text-xs text-gray-500">Attendant: ${sale.cashier || sale.attendant || 'N/A'}</p>
         </div>
-        <div class="mb-4">
-            <table class="w-full text-xs">
-                <thead>
-                    <tr class="border-b border-gray-200">
-                        <th class="py-2 text-left">Item</th>
-                        <th class="py-2 text-center">Qty</th>
-                        <th class="py-2 text-right">Price</th>
-                        <th class="py-2 text-right">Total</th>
-                    </tr>
-                </thead>
-                <tbody>
+        
+        <div class="space-y-2 mb-3">
     `;
 
     (sale.items || []).forEach(item => {
-        const qty = item.quantity || 1;
+        const qty = Number(item.quantity || 1);
         const price = Number(item.price || 0);
         receiptHTML += `
-            <tr class="border-b border-gray-100">
-                <td class="py-2">${item.name}</td>
-                <td class="py-2 text-center">${qty}</td>
-                <td class="py-2 text-right">₱${price.toFixed(2)}</td>
-                <td class="py-2 text-right">₱${(price * qty).toFixed(2)}</td>
-            </tr>
+            <div class="flex justify-between text-sm">
+                <div class="flex-1">
+                    <div class="font-medium">${item.name}</div>
+                    <div class="text-xs text-gray-500">${qty} x ₱${price}</div>
+                </div>
+                <div class="font-semibold">₱${(price * qty).toFixed(2)}</div>
+            </div>
         `;
     });
 
+    // Totals and payment info (match POS)
     receiptHTML += `
-                </tbody>
-            </table>
         </div>
-        <div class="text-xs">
-            <div class="flex justify-between py-1"><span class="font-semibold">Total:</span><span class="font-semibold">₱${Number(sale.total || 0).toFixed(2)}</span></div>
-            <div class="flex justify-between py-1"><span>Payment Method:</span><span>${paymentMethod === 'cash' ? 'Cash' : 'GCash'}</span></div>
+        
+        <div class="border-t border-gray-300 pt-3 space-y-1">
+            <div class="flex justify-between font-semibold">
+                <span>Total:</span>
+                <span>₱${Number(sale.total || 0).toFixed(2)}</span>
+            </div>
+            <div class="flex justify-between text-sm font-medium">
+                <span>Payment Method:</span>
+                <span class="${paymentMethod === 'cash' ? 'text-green-700' : 'text-blue-700'}">${paymentMethod === 'cash' ? 'Cash' : 'GCash'}</span>
+            </div>
     `;
 
     if (paymentMethod === 'cash') {
         const cashR = Number(sale.cashReceived || 0);
-        const change = Number(sale.change || (cashR - Number(sale.total || 0)) || 0);
+        const change = Number('change' in sale ? sale.change : cashR - Number(sale.total || 0));
         receiptHTML += `
-            <div class="flex justify-between py-1"><span>Cash Received:</span><span>₱${cashR.toFixed(2)}</span></div>
-            <div class="flex justify-between py-1"><span>Change:</span><span>₱${change.toFixed(2)}</span></div>
+            <div class="flex justify-between text-sm">
+                <span>Cash Received:</span>
+                <span>₱${cashR.toFixed(2)}</span>
+            </div>
+            <div class="flex justify-between font-semibold text-lg">
+                <span>Change:</span>
+                <span>₱${change.toFixed(2)}</span>
+            </div>
         `;
     } else {
         receiptHTML += `
-            <div class="flex justify-between py-1"><span>Reference #:</span><span>${sale.referenceNumber || 'N/A'}</span></div>
+            <div class="flex justify-between text-sm">
+                <span>GCash Ref #:</span>
+                <span>${sale.referenceNumber || 'N/A'}</span>
+            </div>
+            <div class="flex justify-between font-semibold text-lg">
+                <span>Amount Paid:</span>
+                <span>₱${Number(sale.total || 0).toFixed(2)}</span>
+            </div>
         `;
     }
 
-    receiptHTML += `</div>
-        <div class="text-center mt-4 pt-4 border-t border-gray-200">
-            <p class="text-xs font-semibold">Thank You for Your Purchase!</p>
-            <p class="text-xs text-gray-500">Please Come Again</p>
-        </div>`;
+    // Close totals section (no footer messages)
+    receiptHTML += `
+        </div>
+    `;
     
     receiptViewDetails.innerHTML = receiptHTML;
     receiptViewModal.classList.remove('hidden');
@@ -698,13 +817,8 @@ function printReceipt() {
 
 // Export sales data as CSV (DB-only)
 function exportSalesData() {
-    const fromDate = dateFromInput.value;
-    const toDate = dateToInput.value;
+    const { from: fromDateTime, to: toDateTime } = getDateRange();
     showNotification("Preparing sales data for export...");
-
-    const fromDateTime = new Date(fromDate);
-    const toDateTime = new Date(toDate);
-    toDateTime.setHours(23, 59, 59, 999);
 
     // Use date only in CSV
     const csvHeader = ['Receipt #', 'Date', 'Items', 'Quantity', 'Price per Item', 'Subtotal', 'Payment Method', 'Attendant', 'Total'];
@@ -732,7 +846,7 @@ function exportSalesData() {
                 const ts = sale.timestamp instanceof Date ? sale.timestamp : new Date(sale.timestamp?.seconds ? sale.timestamp.seconds * 1000 : sale.timestamp || Date.now());
                 // Local date YYYY-MM-DD (no time)
                 const formattedDate = `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')}`;
-                const receiptId = sale.id || '';
+                const receiptId = sale.receiptNumber || sale.id || '';
                 if (Array.isArray(sale.items) && sale.items.length > 0) {
                     sale.items.forEach((item, idx) => {
                         const subtotal = Number(item.price || 0) * Number(item.quantity || 1);

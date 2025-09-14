@@ -265,12 +265,6 @@
     <!-- Receipt Modal -->
     <div id="receipt-modal" class="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50 hidden">
         <div class="glass-container rounded-2xl p-8 w-full max-w-md transform transition-transform scale-95 md:scale-100">
-            <div class="flex justify-end items-center mb-6">
-                <button id="save-receipt-btn" class="save-btn px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl font-medium text-sm transition-all duration-200 shadow-sm border border-blue-300 min-w-[80px]">
-                    Save
-                </button>
-            </div>
-            
             <div id="receipt-content">
                 <div id="receipt-details" class="bg-gray-50 rounded-xl p-4 mb-6 border-2 border-dashed border-gray-300">
                     <!-- Receipt content will be generated here -->
@@ -278,8 +272,8 @@
             </div>
             
             <div class="flex space-x-3">
-                <button id="add-to-queue-btn" class="flex-grow px-4 py-3 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-xl font-semibold border border-indigo-300 transition-all duration-200">Add to Queue</button>
-                <button id="close-receipt-btn" class="flex-grow btn-primary">
+                <!-- Removed Add to Queue button; Close is now full-width -->
+                <button id="close-receipt-btn" class="w-full btn-primary">
                     Close Receipt
                 </button>
             </div>

@@ -97,6 +97,8 @@ const idToDoc = new Map(); // numeric item.id -> Firestore doc id
 let currentOrder = [];
 let totalAmount = 0;
 let dailySales = 0; // Will be populated from Firebase
+// Control when inputs should auto-focus to avoid mobile scroll on load
+let allowAutoFocus = false;
 
 // Hold last receipt/order snapshot for queueing from receipt modal
 window._lastReceiptOrder = null;
@@ -124,9 +126,7 @@ const receiptModal = document.getElementById('receipt-modal');
 const editPricesBtn = document.getElementById('edit-prices-btn');
 const closeEditModalBtn = document.getElementById('close-edit-modal');
 const closeReceiptBtn = document.getElementById('close-receipt-btn');
-const saveReceiptBtn = document.getElementById('save-receipt-btn');
 const editItemsContainer = document.getElementById('edit-items-container');
-const addToQueueBtn = document.getElementById('add-to-queue-btn');
 
 // Global unsubscribe function for cleanup
 let unsubscribeFromFirestore = null;
@@ -137,6 +137,8 @@ document.addEventListener('DOMContentLoaded', function() {
     updateOrderDisplay();
     setupEventListeners();
     loadDailySales(); // Load daily sales from Firebase
+    // Attempt to sync any pending sales saved locally (e.g., from offline)
+    flushPendingSales();
 });
 
 // Clean up when page is unloaded
@@ -155,6 +157,9 @@ window.addEventListener('online', function() {
         unsubscribeFromFirestore();
     }
     unsubscribeFromFirestore = subscribeItems();
+
+    // Try to flush any pending sales when back online
+    flushPendingSales();
 });
 
 window.addEventListener('offline', function() {
@@ -298,8 +303,7 @@ function setupEventListeners() {
     clearOrderBtn.addEventListener('click', clearOrder);
     editPricesBtn.addEventListener('click', openEditModal);
     closeEditModalBtn.addEventListener('click', closeEditModal);
-    closeReceiptBtn.addEventListener('click', closeReceiptModal);
-    saveReceiptBtn.addEventListener('click', saveReceiptAsImage);
+    closeReceiptBtn.addEventListener('click', handleCloseReceipt);
     cashReceivedInput.addEventListener('input', calculateChange);
     
     // Add event listener for GCash reference input
@@ -307,14 +311,9 @@ function setupEventListeners() {
         gcashReferenceInput.addEventListener('input', updatePaymentButtonState);
     }
 
-    // Add to Queue from receipt
-    if (addToQueueBtn) {
-        addToQueueBtn.addEventListener('click', addCurrentReceiptToQueue);
-    }
-
-    // Payment method selection
-    cashMethodBtn.addEventListener('click', () => selectPaymentMethod('cash'));
-    gcashMethodBtn.addEventListener('click', () => selectPaymentMethod('gcash'));
+    // Payment method selection (enable auto-focus only after explicit user tap/click)
+    cashMethodBtn.addEventListener('click', () => { allowAutoFocus = true; selectPaymentMethod('cash'); });
+    gcashMethodBtn.addEventListener('click', () => { allowAutoFocus = true; selectPaymentMethod('gcash'); });
     
     const addItemBtn = document.getElementById('add-item-btn');
     if (addItemBtn) addItemBtn.addEventListener('click', handleAddItem);
@@ -509,16 +508,71 @@ function updatePaymentButtonState() {
         processPaymentBtn.classList.remove('opacity-50', 'cursor-not-allowed');
     }
     
-    // Update input field focus when switching payment methods
-    if (isCashMethod && cashReceivedInput) {
-        setTimeout(() => cashReceivedInput.focus(), 100);
-    } else if (isGcashMethod && gcashReferenceInput) {
-        setTimeout(() => gcashReferenceInput.focus(), 100);
+    // Only auto-focus after explicit user action (prevents mobile auto-scroll on load)
+    if (allowAutoFocus) {
+        if (isCashMethod && cashReceivedInput) {
+            setTimeout(() => cashReceivedInput.focus(), 100);
+            allowAutoFocus = false;
+        } else if (isGcashMethod && gcashReferenceInput) {
+            setTimeout(() => gcashReferenceInput.focus(), 100);
+            allowAutoFocus = false;
+        }
     }
 }
 
+// Helper: persist a failed sale to local storage for later retry
+function queueLocalSale(saleDoc) {
+    try {
+        const key = 'pendingSales';
+        const arr = JSON.parse(localStorage.getItem(key) || '[]');
+        arr.push({ ...saleDoc, __queuedAt: new Date().toISOString() });
+        localStorage.setItem(key, JSON.stringify(arr));
+    } catch (_) { /* no-op */ }
+}
+
+// Helper: try to send any locally queued sales to Firestore
+async function flushPendingSales() {
+    const key = 'pendingSales';
+    let arr;
+    try {
+        arr = JSON.parse(localStorage.getItem(key) || '[]');
+    } catch (_) {
+        arr = [];
+    }
+    if (!arr || !arr.length) return;
+    if (!navigator.onLine) return;
+
+    const remaining = [];
+    for (const sale of arr) {
+        try {
+            // Remove client-only marker
+            const { __queuedAt, ...docData } = sale;
+            // Ensure a server timestamp so Sales date filters pick it up
+            if (!docData.timestamp) {
+                docData.timestamp = serverTimestamp();
+            }
+            await addDoc(collection(db, 'sales'), docData);
+        } catch (e) {
+            console.error('Failed to flush a pending sale, will retry later', e);
+            remaining.push(sale);
+        }
+    }
+    try {
+        if (remaining.length) localStorage.setItem(key, JSON.stringify(remaining));
+        else localStorage.removeItem(key);
+    } catch (_) { /* no-op */ }
+}
+
+// Clear order (reset cart and payment inputs)
+function clearOrder() {
+    currentOrder = [];
+    if (cashReceivedInput) cashReceivedInput.value = '';
+    if (gcashReferenceInput) gcashReferenceInput.value = '';
+    updateOrderDisplay();
+}
+
 // Process payment
-function processPayment() {
+async function processPayment() {
     // Get the current payment method
     const isCashMethod = cashMethodBtn.classList.contains('active');
     const isGcashMethod = gcashMethodBtn.classList.contains('active');
@@ -550,35 +604,47 @@ function processPayment() {
     
     // Generate receipt with payment method
     generateReceipt(paymentMethod, paymentDetails);
-    
-    // Update daily sales
+
+    // Read the generated receipt number from the DOM (set by generateReceipt)
+    const receiptDetailsEl = document.getElementById('receipt-details');
+    const receiptNumber = receiptDetailsEl?.dataset?.receiptNumber || ('R' + Date.now().toString().slice(-6));
+
+    // Update daily sales (UI)
     dailySales += totalAmount;
     const salesDisplayEl = document.getElementById('today-sales-display');
     if (salesDisplayEl) {
         salesDisplayEl.textContent = `₱${dailySales.toFixed(2)}`;
     }
-    
+
+    // Prepare sales document to save
+    const baseDoc = {
+        items: currentOrder.map(item => ({
+            id: item.id,
+            name: item.name,
+            price: item.price,
+            quantity: item.quantity,
+            type: item.type
+        })),
+        total: totalAmount,
+        timestamp: serverTimestamp(),
+        paymentMethod: paymentMethod,
+        cashier: getCurrentUserName() || 'Unknown',
+        storeLocation: 'Main Branch',
+        receiptNumber: receiptNumber
+    };
+    const saleDoc = paymentMethod === 'cash'
+        ? { ...baseDoc, cashReceived: paymentDetails.cashReceived || 0, change: (paymentDetails.cashReceived || 0) - totalAmount }
+        : { ...baseDoc, referenceNumber: paymentDetails.referenceNumber || '' };
+
     try {
-        // Store transaction in Firestore
-        addDoc(collection(db, "sales"), {
-            items: currentOrder.map(item => ({
-                id: item.id,
-                name: item.name,
-                price: item.price,
-                quantity: item.quantity,
-                type: item.type
-            })),
-            total: totalAmount,
-            timestamp: serverTimestamp(),
-            paymentMethod: paymentMethod,
-            cashier: getCurrentUserName() || "Unknown",
-            storeLocation: "Main Branch"
-        }).catch(error => {
-            console.error("Error saving sales data:", error);
-            // Continue with receipt display even if save fails
-        });
+        await addDoc(collection(db, 'sales'), saleDoc);
     } catch (error) {
-        console.error("Error in sales data save:", error);
+        console.error('Error saving sales data:', error);
+        queueLocalSale({ ...saleDoc, // fallback timestamp for local record visibility
+            // Use a client timestamp copy for awareness (won't be used by server)
+            clientTimestamp: new Date().toISOString()
+        });
+        alert('Network issue: sale saved locally and will sync when online.');
     }
     
     clearOrder();
@@ -680,16 +746,61 @@ function generateReceipt(paymentMethod = 'cash', paymentDetails = {}) {
     receiptDetails.innerHTML = receiptHTML;
 }
 
+// Save receipt as image (used automatically on close)
+function saveReceiptAsImageAuto() {
+    return new Promise((resolve, reject) => {
+        const receiptContent = document.getElementById('receipt-content');
+        const receiptElement = document.getElementById('receipt-details');
+        if (!receiptContent || !receiptElement) return resolve();
+
+        const isoDate = receiptElement.dataset.date || new Date().toISOString();
+        const dateStr = isoDate.slice(0, 10).replace(/-/g, ''); // YYYYMMDD
+        const receiptNumber = receiptElement.dataset.receiptNumber || ('R' + Date.now().toString().slice(-6));
+        const attendant = receiptElement.dataset.attendant || getCurrentUserName();
+        const safeAttendantName = attendant.replace(/[^a-zA-Z0-9]/g, '');
+        const fileName = `${dateStr}_${receiptNumber}_${safeAttendantName}.png`;
+
+        html2canvas(receiptContent, {
+            backgroundColor: null,
+            scale: 2,
+            logging: false
+        }).then(canvas => {
+            canvas.toBlob(blob => {
+                try {
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = fileName;
+                    link.click();
+                    URL.revokeObjectURL(link.href);
+                } catch (_) {}
+                resolve();
+            });
+        }).catch(err => {
+            console.error('Failed to save receipt image', err);
+            resolve(); // continue even if image save fails
+        });
+    });
+}
+
+// Handle close: save PNG, queue order, then close modal
+async function handleCloseReceipt() {
+    try {
+        await saveReceiptAsImageAuto();
+        await addCurrentReceiptToQueue();
+    } catch (e) {
+        console.error('Auto actions on close failed', e);
+    } finally {
+        closeReceiptModal();
+    }
+}
+
 // Add the current receipt/order to the queue (orders collection)
 async function addCurrentReceiptToQueue() {
     if (!window._lastReceiptOrder || !window._lastReceiptOrder.items || window._lastReceiptOrder.items.length === 0) {
-        alert('No order to queue.');
+        // No order snapshot to queue
         return;
     }
-    if (!addToQueueBtn) return;
     try {
-        addToQueueBtn.disabled = true;
-        addToQueueBtn.classList.add('opacity-60', 'cursor-not-allowed');
         const data = window._lastReceiptOrder;
         await addDoc(collection(db, 'orders'), {
             items: data.items,
@@ -697,93 +808,17 @@ async function addCurrentReceiptToQueue() {
             paymentMethod: data.paymentMethod,
             cashier: data.cashier || getCurrentUserName() || 'Guest',
             receiptNumber: data.receiptNumber || null,
-            status: 'cooking', // Preparing
+            status: 'cooking',
             timestamp: serverTimestamp()
         });
-        // Navigate to the Orders page to view the queue
-        window.location.href = 'orders.html';
     } catch (err) {
-        console.error('Failed to queue order', err);
-        alert('Failed to add to queue');
-    } finally {
-        addToQueueBtn.disabled = false;
-        addToQueueBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+        console.error('Failed to queue order automatically', err);
     }
 }
 
-// Clear order
-function clearOrder() {
-    currentOrder = [];
-    cashReceivedInput.value = '';
-    updateOrderDisplay();
-}
-
-// Modal functions
-function openEditModal() {
-    renderEditableItems();
-    // Rebind add-item button (in case modal was not in DOM earlier)
-    const addItemBtn = document.getElementById('add-item-btn');
-    if (addItemBtn) addItemBtn.addEventListener('click', handleAddItem);
-    editModal.classList.remove('hidden');
-}
-
-function closeEditModal() {
-    editModal.classList.add('hidden');
-    renderMenuItems();
-    renderAddOns();
-}
-
+// Clean up when closing receipt modal
 function closeReceiptModal() {
     receiptModal.classList.add('hidden');
-}
-
-// Save receipt as image
-function saveReceiptAsImage() {
-    // Hide the save button temporarily
-    saveReceiptBtn.style.display = 'none';
-    
-    const receiptContent = document.getElementById('receipt-content');
-    const receiptElement = document.getElementById('receipt-details');
-    
-    // Get data from data attributes
-    const isoDate = receiptElement.dataset.date || new Date().toISOString();
-    const dateStr = isoDate.slice(0, 10).replace(/-/g, ''); // YYYYMMDD format
-    const receiptNumber = receiptElement.dataset.receiptNumber || ('R' + Date.now().toString().slice(-6));
-    const attendant = receiptElement.dataset.attendant || getCurrentUserName();
-    
-    // Create a safe attendant name for the filename (remove spaces, special chars)
-    const safeAttendantName = attendant.replace(/[^a-zA-Z0-9]/g, '');
-    
-    // Create the filename
-    const fileName = `${dateStr}_${receiptNumber}_${safeAttendantName}.png`;
-    
-    // Use html2canvas to convert the receipt to an image
-    html2canvas(receiptContent, {
-        backgroundColor: null,
-        scale: 2, // Higher resolution
-        logging: false
-    }).then(canvas => {
-        // Convert canvas to blob
-        canvas.toBlob(blob => {
-            // Create a download link
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = fileName;
-            
-            // Trigger the download
-            link.click();
-            
-            // Clean up
-            URL.revokeObjectURL(link.href);
-            
-            // Show the save button again
-            saveReceiptBtn.style.display = '';
-        });
-    }).catch(error => {
-        console.error('Failed to save receipt as image:', error);
-        alert('Failed to save receipt as image');
-        saveReceiptBtn.style.display = '';
-    });
 }
 
 // Render editable items in modal
@@ -910,6 +945,22 @@ async function deleteItem(itemId, type) {
     }
 }
 
+// Modal functions for Menu Settings
+function openEditModal() {
+    renderEditableItems();
+    // Rebind add-item button (in case modal was not in DOM earlier)
+    const addItemBtn = document.getElementById('add-item-btn');
+    if (addItemBtn) addItemBtn.addEventListener('click', handleAddItem);
+    editModal.classList.remove('hidden');
+}
+
+function closeEditModal() {
+    editModal.classList.add('hidden');
+    // Refresh main item lists when closing
+    renderMenuItems();
+    renderAddOns();
+}
+
 // Keyboard shortcuts
 document.addEventListener('keydown', function(e) {
     // F1 - Focus on cash input
@@ -948,7 +999,7 @@ document.addEventListener('keydown', function(e) {
             closeEditModal();
         }
         if (!receiptModal.classList.contains('hidden')) {
-            closeReceiptModal();
+            handleCloseReceipt();
         }
     }
 });
@@ -962,7 +1013,7 @@ editModal.addEventListener('click', function(e) {
 
 receiptModal.addEventListener('click', function(e) {
     if (e.target === receiptModal) {
-        closeReceiptModal();
+        handleCloseReceipt();
     }
 });
 
