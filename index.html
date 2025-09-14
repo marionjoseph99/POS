@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- gapi onload/callback hardening to avoid "u[v] is not a function" from apis.google.com -->
+    <script>
+      (function(){
+        function ensureCallback(path){
+          if(!path) return;
+          path = String(path).trim();
+          if(!path) return;
+          var parts = path.split('.');
+          var ctx = window;
+          for(var i=0;i<parts.length-1;i++){
+            var p = parts[i];
+            ctx[p] = ctx[p] || {};
+            ctx = ctx[p];
+          }
+          var last = parts[parts.length-1];
+          if(typeof ctx[last] !== 'function') {
+            ctx[last] = function(){};
+          }
+        }
+        // Pre-create common gapi cb used by platform.js
+        ensureCallback('gapi.loaded_0');
+        // Watch for dynamically injected Google API scripts and ensure their onload/cb exists
+        try {
+          new MutationObserver(function(muts){
+            muts.forEach(function(m){
+              m.addedNodes.forEach(function(n){
+                if(n && n.tagName === 'SCRIPT' && n.src){
+                  try{
+                    var u = new URL(n.src);
+                    if(/apis\.google\.com$/.test(u.hostname)){
+                      var cb = u.searchParams.get('onload') || u.searchParams.get('cb');
+                      if(cb) ensureCallback(cb);
+                    }
+                  }catch(e){}
+                }
+              });
+            });
+          }).observe(document.documentElement, {childList:true, subtree:true});
+        } catch(_) {}
+        // As a last resort, prevent this specific runtime error from bubbling
+        window.addEventListener('error', function(e){
+          var s = String(e && e.message || '') + ' ' + String(e && e.filename || '');
+          if(/apis\.google\.com\/js\/api\.js/.test(s) || /cb=gapi\.loaded_0/.test(s)){
+            e.preventDefault && e.preventDefault();
+            return true;
+          }
+        }, true);
+      })();
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DaxSilog</title>
+    <!-- 
+      Tailwind CSS CDN - Development only
+      Note: For production, install Tailwind CSS as a PostCSS plugin or use the Tailwind CLI
+      See: https://tailwindcss.com/docs/installation
+    -->
+    <script src="https://cdn.tailwindcss.com?v=3.3.0"></script>
+    <!-- html2canvas for saving receipt as image -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23374151'/><text x='50' y='60' font-size='40' fill='white' text-anchor='middle' font-family='Arial'>S</text></svg>">
+</head>
+<body class="min-h-screen">
+    <!-- Header -->
+    
+    <div class="container mx-auto px-8 pb-8">
+        <header class="glass-container mb-6 mx-4 mt-4 rounded-2xl">
+        <div class="container mx-auto px-4 sm:px-8 py-4">
+            <div class="flex flex-col gap-3">
+                <!-- Top row: toggle on the left, Logout on the right (mobile only) -->
+                <div class="flex items-center justify-between sm:hidden">
+                    <button id="mobile-menu-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="header-actions" class="inline-flex items-center justify-center px-3 py-2 h-10 rounded-xl border border-gray-300 bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                    </button>
+                    <button id="logout-btn" class="px-3 py-2 h-10 flex items-center bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-red-300 hidden">Logout</button>
+                </div>
+
+                <!-- Collapsible header actions (below on mobile, single row on desktop) -->
+                <div id="header-actions" class="hidden sm:flex items-center justify-between gap-3">
+                    <!-- Left group: nav + indicators + (sign in on mobile/desktop left) -->
+                    <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                        <div id="offline-indicator" class="hidden px-3 py-1 bg-amber-50 text-amber-700 rounded-xl font-medium text-xs border border-amber-200 flex items-center space-x-1 flex-shrink-0">
+                            <span class="inline-block w-2 h-2 bg-amber-500 rounded-full"></span>
+                            <span>Offline Mode</span>
+                        </div>
+                        <!-- Grouped nav buttons with extra gap -->
+                        <div class="flex items-center gap-3 sm:gap-4">
+                            <a href="sales.html" class="px-3 sm:px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-gray-300">
+                                Sales
+                            </a>
+                            <a href="orders.html" class="px-3 sm:px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-gray-300">
+                                Orders
+                            </a>
+                            <button id="edit-prices-btn" class="px-3 sm:px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-gray-300">
+                                Menu Settings
+                            </button>
+                        </div>
+                        <a href="login.html" id="signin-link" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-xl text-xs sm:text-sm font-medium shadow-sm">Sign In</a>
+                    </div>
+                    <!-- Right group (desktop/tablet): Logout button -->
+                    <div class="hidden sm:flex items-center gap-2 ml-auto">
+                        <button id="logout-btn-desktop" class="px-3 py-2 h-10 flex items-center bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-red-300 hidden">Logout</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- Menu Section (Left Column) -->
+            <div class="lg:col-span-2 glass-container rounded-2xl p-6">
+                <!-- Main Menu Items -->
+                <div class="mb-8">
+                    <div class="section-header">
+                        Silog Meals
+                    </div>
+                    <div id="menu-items-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+                        <!-- Menu items will be rendered here by JavaScript -->
+                    </div>
+                </div>
+
+                <!-- Add-ons Section -->
+                <div>
+                    <div class="section-header">
+                        Add-ons
+                    </div>
+                    <div id="addons-items-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                        <!-- Add-on items will be rendered here by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Order and Payment Section (Right Column) -->
+            <div class="lg:col-span-1 glass-container rounded-2xl p-6 flex flex-col h-fit">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-xl font-bold text-gray-800">Order Summary</h2>
+                    <div class="px-3 py-1 bg-gray-100 text-gray-700 rounded-lg text-sm font-semibold">
+                        <span id="order-count">0</span> items
+                    </div>
+                </div>
+
+                <!-- Order List -->
+                <div id="order-list-container" class="flex-grow max-h-[300px] overflow-y-auto custom-scrollbar mb-6">
+                    <table class="order-table">
+                        <thead>
+                            <tr>
+                                <th class="py-3">Item</th>
+                                <th class="py-3 text-center">Qty</th>
+                                <th class="py-3 text-right">Price</th>
+                            </tr>
+                        </thead>
+                        <tbody id="order-list">
+                            <!-- Order items will be rendered here -->
+                        </tbody>
+                    </table>
+                    <!-- Placeholder for empty order list -->
+                    <div id="empty-cart-message" class="text-center py-12 hidden">
+                        <div class="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center mx-auto mb-4">
+                            <span class="text-2xl text-gray-400">Cart</span>
+                        </div>
+                        <p class="text-gray-500 font-medium">Your order is empty</p>
+                        <p class="text-gray-400 text-sm">Add some items to get started</p>
+                    </div>
+                </div>
+
+                <!-- Total Section -->
+                <div class="border-t-2 border-gray-100 pt-4 mb-6">
+                    <div class="flex justify-between items-center">
+                        <span class="text-lg font-semibold text-gray-700">Total Amount:</span>
+                        <span id="total-amount" class="text-2xl font-bold text-gray-900">₱0.00</span>
+                    </div>
+                </div>
+
+                <!-- Payment Section -->
+                <div class="space-y-4 mb-6">
+                    <!-- Payment Method Selection -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">Payment Method:</label>
+                        <div class="grid grid-cols-2 gap-3">
+                            <button id="cash-method-btn" class="payment-method-btn active py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-sm transition-all duration-200 border border-gray-300 flex items-center justify-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                </svg>
+                                Cash
+                            </button>
+                            <button id="gcash-method-btn" class="payment-method-btn py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-sm transition-all duration-200 border border-gray-300 flex items-center justify-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                </svg>
+                                GCash
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Cash Payment Section -->
+                    <div id="cash-payment-section">
+                        <label for="cash-received" class="block text-sm font-semibold text-gray-700 mb-2">Cash Received:</label>
+                        <input type="number" id="cash-received" class="form-input" placeholder="Enter cash amount" oninput="calculateChange()">
+                    </div>
+
+                    <!-- GCash Payment Section -->
+                    <div id="gcash-payment-section" class="hidden">
+                        <label for="gcash-reference" class="block text-sm font-semibold text-gray-700 mb-2">GCash Reference #:</label>
+                        <input type="text" id="gcash-reference" class="form-input" placeholder="Enter GCash reference number">
+                    </div>
+
+                    <div class="flex justify-between items-center p-4 bg-gray-50 rounded-xl border border-gray-200">
+                        <span class="text-sm font-semibold text-gray-700">Change:</span>
+                        <span id="change-amount" class="text-xl font-bold text-gray-900">₱0.00</span>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="space-y-3">
+                    <button id="process-payment-btn" class="w-full btn-primary">
+                        Process Payment
+                    </button>
+                    <button id="clear-order-btn" class="w-full btn-secondary">
+                        Clear Order
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Prices Modal -->
+    <div id="edit-modal" class="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-container rounded-2xl p-8 w-full max-w-4xl transform transition-transform scale-95 md:scale-100 overflow-hidden">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">
+                    Menu Settings
+                </h2>
+                <button id="close-edit-modal" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-sm transition-all duration-200 shadow-sm border border-gray-300">
+                    Done
+                </button>
+            </div>
+
+            <!-- Add New Item Form -->
+            <div class="mb-6 p-4 bg-gray-50 rounded-xl border border-gray-200">
+                <h3 class="text-lg font-semibold text-gray-800 mb-3">Add new item</h3>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <input id="new-item-name" type="text" class="form-input" placeholder="Name">
+                    <input id="new-item-price" type="number" min="0" step="0.01" class="form-input" placeholder="Price">
+                    <select id="new-item-type" class="form-input">
+                        <option value="menu">Menu</option>
+                        <option value="addon">Add-on</option>
+                    </select>
+                    <button id="add-item-btn" class="btn-primary">Add Item</button>
+                </div>
+            </div>
+
+            <div id="edit-items-container" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-h-96 overflow-y-auto overflow-x-hidden custom-scrollbar pr-2 pb-2">
+                <!-- Editable menu items will be rendered here by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Receipt Modal -->
+    <div id="receipt-modal" class="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-container rounded-2xl p-8 w-full max-w-md transform transition-transform scale-95 md:scale-100">
+            <div class="flex justify-between items-center mb-6">
+                <div class="flex-grow text-center">
+                    <div class="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <span class="text-white font-bold text-xl">R</span>
+                    </div>
+                    <h2 class="text-2xl font-bold text-gray-800">Official Receipt</h2>
+                    <p class="text-gray-600 text-sm">Thank you for your purchase!</p>
+                </div>
+                <button id="save-receipt-btn" class="save-btn px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl font-medium text-sm transition-all duration-200 shadow-sm border border-blue-300 ml-4 min-w-[80px] flex-shrink-0">
+                    Save
+                </button>
+            </div>
+            
+            <div id="receipt-content">
+                <div id="receipt-details" class="bg-gray-50 rounded-xl p-4 mb-6 border-2 border-dashed border-gray-300">
+                    <!-- Receipt content will be generated here -->
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button id="add-to-queue-btn" class="flex-grow px-4 py-3 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-xl font-semibold border border-indigo-300 transition-all duration-200">Add to Queue</button>
+                <button id="close-receipt-btn" class="flex-grow btn-primary">
+                    Close Receipt
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="auth.js"></script>
+    <script type="module" src="script.js"></script>
+    <script>
+      (function () {
+        const btn = document.getElementById('mobile-menu-toggle');
+        const menu = document.getElementById('header-actions');
+        if (!btn || !menu) return;
+        btn.addEventListener('click', () => {
+          const willOpen = menu.classList.contains('hidden');
+          menu.classList.toggle('hidden');
+          btn.setAttribute('aria-expanded', String(willOpen));
+        });
+      })();
+    </script>
+</body>
+</html>

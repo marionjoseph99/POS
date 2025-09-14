@@ -1,0 +1,137 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // User authentication check
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Check if user is admin
+    function isAdmin() {
+      return isAuthenticated() && 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+    
+    // Item validation function
+    function isItem(data) {
+      return data.keys().hasOnly(['id','name','price','type','isActive','createdAt'])
+        && data.id is number
+        && data.name is string
+        && data.name.size() > 0
+        && data.price is number
+        && data.price >= 0
+        && (data.type in ['menu','addon'])
+        && (!('isActive' in data) || data.isActive is bool)
+        && (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+    
+    // Queue validation function
+    function isQueueItem(data) {
+      return data.number is number
+        && data.status is string
+        && (data.status in ['waiting', 'called', 'served', 'test'])
+        && (!('orderItems' in data) || data.orderItems is list)
+        && (!('total' in data) || data.total is number)
+        && (!('paymentMethod' in data) || data.paymentMethod is string);
+    }
+    
+    // Order validation function
+    function isOrder(data) {
+      return data.keys().hasAny(['customerName','items','status','timestamp','totalAmount','paymentMethod','cashier','updatedBy','updatedByEmail','statusUpdatedAt']) &&
+        ('items' in data ? data.items is list : true) &&
+        ('status' in data ? data.status is string : true) &&
+        ('timestamp' in data ? data.timestamp is timestamp : true) &&
+        ('totalAmount' in data ? data.totalAmount is number : true);
+    }
+
+    // Valid order statuses (used for status-only updates)
+    function isValidOrderStatus(s) {
+      return s in ['waiting','cooking','ready','served','cancelled'];
+    }
+
+    // Allow unauthenticated status-only updates on orders
+    function isOrderStatusUpdate() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly(['status','statusUpdatedAt','updatedBy','updatedByEmail'])
+        && request.resource.data.status is string
+        && isValidOrderStatus(request.resource.data.status)
+        && (!('statusUpdatedAt' in request.resource.data) || request.resource.data.statusUpdatedAt is timestamp)
+        && (!('updatedBy' in request.resource.data) || request.resource.data.updatedBy is string)
+        && (!('updatedByEmail' in request.resource.data) || request.resource.data.updatedByEmail is string);
+    }
+
+    // Queue settings validation
+    function isQueueSettings(data) {
+      return ('currentNumber' in data ? data.currentNumber is number : true)
+        && ('lastIssued' in data ? data.lastIssued is number : true)
+        && ('startNumber' in data ? data.startNumber is number : true)
+        && (!('updatedAt' in data) || data.updatedAt is timestamp)
+        && (!('lastUpdated' in data) || data.lastUpdated is timestamp)
+        && (!('created' in data) || data.created is timestamp);
+    }
+
+    // Allow guests to safely bump lastIssued by +1 only on the 'current' doc
+    function canGuestUpdateQueueSettings() {
+      let diff = request.resource.data.diff(resource.data);
+      return (resource.id == 'current')
+        && diff.changedKeys().hasOnly(['lastIssued','updatedAt','lastUpdated'])
+        && request.resource.data.lastIssued is number
+        && resource.data.lastIssued is number
+        && request.resource.data.lastIssued == resource.data.lastIssued + 1;
+    }
+
+    // Items collection rules
+    match /items/{itemId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isItem(request.resource.data);
+      allow update: if isAuthenticated() && isItem(request.resource.data) && request.resource.data.id == resource.data.id;
+      allow delete: if isAdmin();
+    }
+
+    // Queue settings rules
+    match /queueSettings/{settingId} {
+      allow read: if true;
+      // Allow authenticated create, or guest create for the 'current' doc with valid data
+      allow create: if (isAuthenticated() && isQueueSettings(request.resource.data))
+                    || (settingId == 'current' && isQueueSettings(request.resource.data));
+      // Allow authenticated updates, or restricted guest bump of lastIssued by +1
+      allow update: if (isAuthenticated() && isQueueSettings(request.resource.data))
+                    || canGuestUpdateQueueSettings();
+      allow delete: if isAdmin();
+    }
+
+    // Queue list rules (old system)
+    match /queueList/{queueId} {
+      allow read: if true;
+      // Permit guest create/update but enforce schema
+      allow create: if isQueueItem(request.resource.data);
+      allow update: if isQueueItem(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Orders collection rules (new card-based queue system)
+    match /orders/{orderId} {
+      allow read: if true;
+      // Allow anyone to create a valid order (guest POS use-case)
+      allow create: if isOrder(request.resource.data);
+      // Allow authenticated full updates OR guest status-only updates
+      allow update: if (isAuthenticated() && isOrder(request.resource.data)) || isOrderStatusUpdate();
+      allow delete: if isAdmin();
+    }
+
+    // Sales collection rules
+    match /sales/{saleId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if false; // Sales records should be immutable after creation
+    }
+
+    // Users collection rules (if you decide to add user roles)
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- gapi onload/callback hardening to avoid "u[v] is not a function" from apis.google.com -->
+  <script>
+    (function(){
+      function ensureCallback(path){
+        if(!path) return; path=String(path).trim(); if(!path) return;
+        var parts=path.split('.'), ctx=window;
+        for(var i=0;i<parts.length-1;i++){ ctx[parts[i]]=ctx[parts[i]]||{}; ctx=ctx[parts[i]]; }
+        var last=parts[parts.length-1];
+        if(typeof ctx[last]!== 'function'){ ctx[last]=function(){}; }
+      }
+      ensureCallback('gapi.loaded_0');
+      try{
+        new MutationObserver(function(muts){
+          muts.forEach(function(m){
+            m.addedNodes.forEach(function(n){
+              if(n && n.tagName==='SCRIPT' && n.src){
+                try{ var u=new URL(n.src);
+                  if(/apis\.google\.com$/.test(u.hostname)){
+                    var cb=u.searchParams.get('onload')||u.searchParams.get('cb');
+                    if(cb) ensureCallback(cb);
+                  }
+                }catch(e){}
+              }
+            });
+          });
+        }).observe(document.documentElement,{childList:true,subtree:true});
+      }catch(_){ }
+      window.addEventListener('error',function(e){
+        var s=String(e&&e.message||'')+' '+String(e&&e.filename||'');
+        if(/apis\.google\.com\/js\/api\.js/.test(s)||/cb=gapi\.loaded_0/.test(s)){
+          e.preventDefault && e.preventDefault();
+          return true;
+        }
+      },true);
+    })();
+  </script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Order Status - DaxSilog</title>
+  <script src="https://cdn.tailwindcss.com?v=3.3.0"></script>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23374151'/><text x='50' y='60' font-size='40' fill='white' text-anchor='middle' font-family='Arial'>S</text></svg>">
+</head>
+<body class="min-h-screen">
+  <div class="container mx-auto px-8 pb-8">
+    <header class="glass-container mb-6 mx-4 mt-4 rounded-2xl">
+      <div class="container mx-auto px-4 sm:px-8 py-4">
+        <div class="flex flex-col gap-3">
+          <!-- Top row (mobile only): toggle left, Logout right -->
+          <div class="flex items-center justify-between sm:hidden">
+            <button id="mobile-menu-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="header-actions" class="inline-flex items-center justify-center px-3 py-2 h-10 rounded-xl border border-gray-300 bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <button id="logout-btn" class="px-3 py-2 h-10 flex items-center bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-red-300 hidden">Logout</button>
+          </div>
+
+          <!-- Collapsible header actions (visible on sm+): left nav, right logout -->
+          <div id="header-actions" class="hidden sm:flex items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+              <!-- Offline indicator -->
+              <div id="offline-indicator" class="hidden px-3 py-1 bg-amber-50 text-amber-700 rounded-xl font-medium text-xs border border-amber-200 flex items-center space-x-1 flex-shrink-0">
+                <span class="inline-block w-2 h-2 bg-amber-500 rounded-full"></span>
+                <span>Offline Mode</span>
+              </div>
+              <!-- Nav buttons with extra gap -->
+              <div class="flex items-center gap-3 sm:gap-4">
+                <a href="index.html" class="px-3 sm:px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-gray-300">POS</a>
+                <a href="sales.html" class="px-3 sm:px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-gray-300">Sales</a>
+                <a href="orders.html" class="px-3 sm:px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-gray-300">Orders</a>
+              </div>
+              <a href="login.html" id="signin-link" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-xl text-xs sm:text-sm font-medium shadow-sm">Sign In</a>
+            </div>
+            <div class="hidden sm:flex items-center gap-2 ml-auto">
+              <button id="logout-btn-desktop" class="px-3 py-2 h-10 flex items-center bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-red-300 hidden">Logout</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="glass-container rounded-2xl p-6">
+      <div class="flex flex-col gap-4">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <h2 class="text-xl font-bold text-gray-800">Kitchen Queue</h2>
+          <div class="flex flex-wrap gap-2" id="status-filters">
+            <button data-filter="all" class="px-3 py-1 rounded-lg border border-gray-300 bg-gray-100 text-gray-700 text-sm font-medium">All</button>
+            <button data-filter="cooking" class="px-3 py-1 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm font-semibold">Preparing</button>
+            <button data-filter="served" class="px-3 py-1 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 text-sm font-medium">Served</button>
+            <button data-filter="cancelled" class="px-3 py-1 rounded-lg border border-rose-300 bg-rose-50 text-rose-800 text-sm font-medium">Cancelled</button>
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-3">
+          <div id="orders-count" class="text-sm text-gray-600"></div>
+        </div>
+      </div>
+      <div id="orders-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-4"></div>
+      <div id="empty-orders" class="text-center text-gray-500 py-12 hidden">No queued orders.</div>
+    </div>
+  </div>
+
+  <script type="module" src="auth.js"></script>
+  <script type="module" src="orders.js"></script>
+  <script>
+    // Mobile header menu toggle
+    (function () {
+      const btn = document.getElementById('mobile-menu-toggle');
+      const menu = document.getElementById('header-actions');
+      if (!btn || !menu) return;
+      btn.addEventListener('click', () => {
+        const willOpen = menu.classList.contains('hidden');
+        menu.classList.toggle('hidden');
+        btn.setAttribute('aria-expanded', String(willOpen));
+      });
+    })();
+  </script>
+</body>
+</html>

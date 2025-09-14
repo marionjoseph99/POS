@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- gapi onload/callback hardening to avoid "u[v] is not a function" from apis.google.com -->
+  <script>
+    (function(){
+      function ensureCallback(path){
+        if(!path) return; path=String(path).trim(); if(!path) return;
+        var parts=path.split('.'), ctx=window;
+        for(var i=0;i<parts.length-1;i++){ ctx[parts[i]]=ctx[parts[i]]||{}; ctx=ctx[parts[i]]; }
+        var last=parts[parts.length-1];
+        if(typeof ctx[last]!== 'function'){ ctx[last]=function(){}; }
+      }
+      ensureCallback('gapi.loaded_0');
+      try{
+        new MutationObserver(function(muts){
+          muts.forEach(function(m){
+            m.addedNodes.forEach(function(n){
+              if(n && n.tagName==='SCRIPT' && n.src){
+                try{ var u=new URL(n.src);
+                  if(/apis\.google\.com$/.test(u.hostname)){
+                    var cb=u.searchParams.get('onload')||u.searchParams.get('cb');
+                    if(cb) ensureCallback(cb);
+                  }
+                }catch(e){}
+              }
+            });
+          });
+        }).observe(document.documentElement,{childList:true,subtree:true});
+      }catch(_){ }
+      window.addEventListener('error',function(e){
+        var s=String(e&&e.message||'')+' '+String(e&&e.filename||'');
+        if(/apis\.google\.com\/js\/api\.js/.test(s)||/cb=gapi\.loaded_0/.test(s)){
+          e.preventDefault && e.preventDefault();
+          return true;
+        }
+      },true);
+    })();
+  </script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In - Silog POS</title>
+  <!-- 
+    Tailwind CSS CDN - Development only
+    Note: For production, install Tailwind CSS as a PostCSS plugin or use the Tailwind CLI
+    See: https://tailwindcss.com/docs/installation
+  -->
+  <script src="https://cdn.tailwindcss.com?v=3.3.0"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+  <div class="w-full max-w-md">
+    <div class="glass-container rounded-2xl p-8">
+      <div class="text-center mb-6">
+        <div class="w-12 h-12 bg-gray-800 rounded-xl flex items-center justify-center mx-auto mb-3">
+          <span class="text-white font-bold text-lg">S</span>
+        </div>
+        <h1 class="text-2xl font-bold text-gray-800">Silog POS</h1>
+        <p class="text-gray-600 text-sm">Sign in to manage your POS</p>
+      </div>
+
+      <!-- Tabs -->
+      <div class="mb-6 flex rounded-xl overflow-hidden border border-gray-200">
+        <button id="tab-login" class="flex-1 px-4 py-2 text-sm font-medium bg-gray-100">Sign In</button>
+        <button id="tab-register" class="flex-1 px-4 py-2 text-sm font-medium">Register</button>
+        <button id="tab-forgot" class="flex-1 px-4 py-2 text-sm font-medium">Forgot</button>
+      </div>
+
+      <!-- Sign In -->
+      <form id="form-login" class="space-y-3">
+        <input id="login-email" type="email" class="form-input w-full" placeholder="Email" required />
+        <input id="login-password" type="password" class="form-input w-full" placeholder="Password" required />
+        <button type="submit" class="btn-primary w-full">Sign In</button>
+      </form>
+
+      <!-- Register -->
+      <form id="form-register" class="space-y-3 hidden">
+        <input id="register-name" type="text" class="form-input w-full" placeholder="Full Name" required />
+        <input id="register-email" type="email" class="form-input w-full" placeholder="Email" required />
+        <input id="register-password" type="password" class="form-input w-full" placeholder="Password (6+ chars)" minlength="6" required />
+        <button type="submit" class="btn-primary w-full">Create Account</button>
+      </form>
+
+      <!-- Forgot Password -->
+      <form id="form-forgot" class="space-y-3 hidden">
+        <input id="forgot-email" type="email" class="form-input w-full" placeholder="Email" required />
+        <button type="submit" class="btn-primary w-full">Send Reset Email</button>
+      </form>
+
+      <p id="auth-message" class="text-center text-sm text-red-600 mt-4 hidden"></p>
+    </div>
+  </div>
+
+  <script type="module" src="login.js"></script>
+</body>
+</html>

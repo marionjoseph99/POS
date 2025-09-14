@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- gapi onload/callback hardening to avoid "u[v] is not a function" from apis.google.com -->
+    <script>
+      (function(){
+        function ensureCallback(path){
+          if(!path) return; path=String(path).trim(); if(!path) return;
+          var parts=path.split('.'), ctx=window;
+          for(var i=0;i<parts.length-1;i++){ ctx[parts[i]]=ctx[parts[i]]||{}; ctx=ctx[parts[i]]; }
+          var last=parts[parts.length-1];
+          if(typeof ctx[last]!== 'function'){ ctx[last]=function(){}; }
+        }
+        ensureCallback('gapi.loaded_0');
+        try{
+          new MutationObserver(function(muts){
+            muts.forEach(function(m){
+              m.addedNodes.forEach(function(n){
+                if(n && n.tagName==='SCRIPT' && n.src){
+                  try{ var u=new URL(n.src);
+                    if(/apis\.google\.com$/.test(u.hostname)){
+                      var cb=u.searchParams.get('onload')||u.searchParams.get('cb');
+                      if(cb) ensureCallback(cb);
+                    }
+                  }catch(e){}
+                }
+              });
+            });
+          }).observe(document.documentElement,{childList:true,subtree:true});
+        }catch(_){ }
+        window.addEventListener('error',function(e){
+          var s=String(e&&e.message||'')+' '+String(e&&e.filename||'');
+          if(/apis\.google\.com\/js\/api\.js/.test(s)||/cb=gapi\.loaded_0/.test(s)){
+            e.preventDefault && e.preventDefault();
+            return true;
+          }
+        },true);
+      })();
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sales Dashboard - DaxSilog</title>
+    <!-- 
+      Tailwind CSS CDN - Development only
+      Note: For production, install Tailwind CSS as a PostCSS plugin or use the Tailwind CLI
+      See: https://tailwindcss.com/docs/installation
+      
+      Production implementation steps:
+      1. Install Tailwind via npm: npm install tailwindcss
+      2. Create config: npx tailwindcss init
+      3. Build CSS: npx tailwindcss -i input.css -o output.css
+      4. Replace this CDN with the compiled CSS file
+    -->
+    <script src="https://cdn.tailwindcss.com?v=3.3.0"></script>
+    <!-- Chart.js for sales graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23374151'/><text x='50' y='60' font-size='40' fill='white' text-anchor='middle' font-family='Arial'>S</text></svg>">
+</head>
+<body class="min-h-screen">
+    <!-- Header -->
+    <div class="container mx-auto px-8 pb-8">
+        <header class="glass-container mb-6 mx-4 mt-4 rounded-2xl">
+            <div class="container mx-auto px-4 sm:px-8 py-4">
+                <div class="flex flex-col gap-3">
+                    <!-- Top row (mobile only): toggle left, Logout right -->
+                    <div class="flex items-center justify-between sm:hidden">
+                        <button id="mobile-menu-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="header-actions" class="inline-flex items-center justify-center px-3 py-2 h-10 rounded-xl border border-gray-300 bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                            </svg>
+                        </button>
+                        <button id="logout-btn" class="px-3 py-2 h-10 flex items-center bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-red-300 hidden">Logout</button>
+                    </div>
+
+                    <!-- Collapsible header actions (visible on sm+): left nav, right logout) -->
+                    <div id="header-actions" class="hidden sm:flex items-center justify-between gap-3">
+                        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                            <div id="offline-indicator" class="hidden px-3 py-1 bg-amber-50 text-amber-700 rounded-xl font-medium text-xs border border-amber-200 flex items-center space-x-1 flex-shrink-0">
+                                <span class="inline-block w-2 h-2 bg-amber-500 rounded-full"></span>
+                                <span>Offline Mode</span>
+                            </div>
+                            <!-- Nav buttons with extra gap -->
+                            <div class="flex items-center gap-3 sm:gap-4">
+                                <a href="index.html" class="px-3 sm:px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-gray-300">POS</a>
+                                <a href="sales.html" class="px-3 sm:px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-gray-300">Sales</a>
+                                <a href="orders.html" class="px-3 sm:px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-gray-300">Orders</a>
+                            </div>
+                            <a href="login.html" id="signin-link" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-xl text-xs sm:text-sm font-medium shadow-sm">Sign In</a>
+                        </div>
+                        <div class="hidden sm:flex items-center gap-2 ml-auto">
+                            <button id="logout-btn-desktop" class="px-3 py-2 h-10 flex items-center bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-medium text-xs sm:text-sm transition-all duration-200 shadow-sm border border-red-300 hidden">Logout</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Date Range Selector -->
+        <div class="glass-container rounded-2xl p-6 mb-6">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-gray-800 mb-2">Sales Overview</h2>
+                    <p class="text-sm text-gray-600">View and analyze your sales data</p>
+                </div>
+                <div class="flex flex-wrap gap-4">
+                    <div class="flex items-center space-x-2">
+                        <label for="date-from" class="text-sm font-medium text-gray-700">From:</label>
+                        <input type="date" id="date-from" class="form-input py-2 px-3">
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <label for="date-to" class="text-sm font-medium text-gray-700">To:</label>
+                        <input type="date" id="date-to" class="form-input py-2 px-3">
+                    </div>
+                    <button id="apply-date-filter" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium text-sm transition-all duration-200 shadow-sm">
+                        Apply
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sales Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+            <!-- Total Sales -->
+            <div class="glass-container rounded-2xl p-6">
+                <div class="flex items-start justify-between">
+                    <div>
+                        <p class="text-sm text-gray-600">Total Sales</p>
+                        <h3 id="total-sales-value" class="text-2xl font-bold text-gray-800 mt-1">-</h3>
+                        <p id="sales-trend" class="text-xs mt-1 flex items-center hidden">
+                            <span class="inline-block mr-1 trend-arrow">-</span> <span class="trend-value">-</span>
+                        </p>
+                    </div>
+                    <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                        <span class="text-blue-600 text-lg">₱</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Total Orders -->
+            <div class="glass-container rounded-2xl p-6">
+                <div class="flex items-start justify-between">
+                    <div>
+                        <p class="text-sm text-gray-600">Total Orders</p>
+                        <h3 id="total-orders-value" class="text-2xl font-bold text-gray-800 mt-1">-</h3>
+                        <p id="orders-trend" class="text-xs mt-1 flex items-center hidden">
+                            <span class="inline-block mr-1 trend-arrow">-</span> <span class="trend-value">-</span>
+                        </p>
+                    </div>
+                    <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                        <span class="text-purple-600 text-lg">#</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Payment Methods -->
+            <div class="glass-container rounded-2xl p-6">
+                <div class="flex items-start justify-between">
+                    <div>
+                        <p class="text-sm text-gray-600">Payment Methods</p>
+                        <div class="mt-2 space-y-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs font-medium">Cash</span>
+                                <span id="cash-percent" class="text-xs font-bold">-</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-1.5">
+                                <div id="cash-progress" class="bg-blue-600 h-1.5 rounded-full" style="width: 0%"></div>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs font-medium">GCash</span>
+                                <span id="gcash-percent" class="text-xs font-bold">-</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-1.5">
+                                <div id="gcash-progress" class="bg-green-600 h-1.5 rounded-full" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
+                        <span class="text-indigo-600 text-lg">%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Average Order Value -->
+            <div class="glass-container rounded-2xl p-6">
+                <div class="flex items-start justify-between">
+                    <div>
+                        <p class="text-sm text-gray-600">Average Order</p>
+                        <h3 id="avg-order-value" class="text-2xl font-bold text-gray-800 mt-1">-</h3>
+                        <p id="avg-trend" class="text-xs mt-1 flex items-center hidden">
+                            <span class="inline-block mr-1 trend-arrow">-</span> <span class="trend-value">-</span>
+                        </p>
+                    </div>
+                    <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                        <span class="text-green-600 text-lg">~</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Best Selling Item -->
+            <div class="glass-container rounded-2xl p-6">
+                <div class="flex items-start justify-between">
+                    <div>
+                        <p class="text-sm text-gray-600">Best Seller</p>
+                        <h3 id="best-seller-name" class="text-lg font-bold text-gray-800 mt-1 line-clamp-1">-</h3>
+                        <p id="best-seller-count" class="text-xs text-gray-500 mt-1">-</p>
+                    </div>
+                    <div class="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
+                        <span class="text-amber-600 text-lg">★</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sales Chart and Top Products -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <!-- Sales Chart -->
+            <div class="glass-container rounded-2xl p-6 lg:col-span-2">
+                <h3 class="text-lg font-bold text-gray-800 mb-4">Sales Trend</h3>
+                <div id="chart-container" class="h-80">
+                    <div id="chart-loading" class="flex items-center justify-center h-full">
+                        <div class="text-center">
+                            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-gray-900"></div>
+                            <p class="mt-2 text-gray-600">Preparing chart data...</p>
+                        </div>
+                    </div>
+                    <div id="chart-empty" class="flex items-center justify-center h-full hidden">
+                        <div class="text-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-gray-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            </svg>
+                            <p class="text-gray-500">No sales data to display</p>
+                            <p class="text-gray-400 text-sm mt-1">Complete sales to see your trend</p>
+                        </div>
+                    </div>
+                    <canvas id="sales-chart" class="hidden"></canvas>
+                </div>
+            </div>
+
+            <!-- Top Products -->
+            <div class="glass-container rounded-2xl p-6">
+                <h3 class="text-lg font-bold text-gray-800 mb-4">Top Products</h3>
+                <div id="top-products-container" class="space-y-4">
+                    <div id="products-loading" class="flex items-center justify-center p-6">
+                        <div class="text-center">
+                            <div class="inline-block animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-gray-900"></div>
+                            <p class="mt-2 text-gray-600">Loading top products...</p>
+                        </div>
+                    </div>
+                    <div id="products-empty" class="p-6 text-center hidden">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-gray-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                        </svg>
+                        <p class="text-gray-500">No products sold yet</p>
+                        <p class="text-gray-400 text-sm mt-1">Complete sales to see top products</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Sales -->
+        <div class="glass-container rounded-2xl p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-lg font-bold text-gray-800">Recent Sales</h3>
+                <button id="export-sales" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-sm transition-all duration-200 shadow-sm border border-gray-300 flex items-center">
+                    <span>Export</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Receipt #</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Attendant</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                            <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sales-table-body" class="bg-white divide-y divide-gray-200">
+                        <tr>
+                            <td colspan="7" class="px-6 py-6 text-center text-gray-500">
+                                <div id="sales-loading" class="py-4">
+                                    <div class="inline-block animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-gray-900"></div>
+                                    <p class="mt-2 text-gray-600">Loading sales data...</p>
+                                </div>
+                                <div id="sales-empty" class="py-4 hidden">
+                                    <p class="text-gray-600">No sales records found in selected period.</p>
+                                    <p class="text-gray-500 text-sm mt-1">Transactions will appear here when completed.</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-6 flex items-center justify-between">
+                <p id="sales-pagination-info" class="text-sm text-gray-600">-</p>
+                <div id="pagination-controls" class="flex space-x-2">
+                    <button id="prev-page" class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md text-sm font-medium" disabled>Previous</button>
+                    <div id="page-numbers" class="flex space-x-2">
+                        <!-- Page numbers will be dynamically inserted here -->
+                    </div>
+                    <button id="next-page" class="px-3 py-1 bg-gray-100 text-gray-700 rounded-md text-sm font-medium" disabled>Next</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Receipt View Modal -->
+    <div id="receipt-view-modal" class="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50 hidden">
+        <div class="glass-container rounded-2xl p-8 w-full max-w-md transform transition-transform scale-95 md:scale-100">
+            <div class="flex justify-between items-center mb-6">
+                <div class="flex-grow text-center">
+                    <div class="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <span class="text-white font-bold text-xl">R</span>
+                    </div>
+                    <h2 class="text-2xl font-bold text-gray-800">Receipt Details</h2>
+                    <p class="text-gray-600 text-sm" id="receipt-view-number">Loading receipt...</p>
+                    <div class="mt-2" id="receipt-payment-method">
+                        <!-- Payment method will be inserted here -->
+                    </div>
+                </div>
+                <button id="print-receipt-btn" class="save-btn px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl font-medium text-sm transition-all duration-200 shadow-sm border border-blue-300 ml-4 min-w-[80px] flex-shrink-0">
+                    Print
+                </button>
+            </div>
+            
+            <div id="receipt-view-content">
+                <div id="receipt-view-details" class="bg-gray-50 rounded-xl p-4 mb-6 border-2 border-dashed border-gray-300">
+                    <div class="text-center py-4">
+                        <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-gray-900"></div>
+                        <p class="mt-2 text-gray-600">Loading receipt details...</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button id="close-receipt-view-btn" class="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-sm transition-all duration-200 shadow-sm">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="auth.js"></script>
+    <script type="module" src="sales.js"></script>
+    <script>
+      // Mobile header menu toggle
+      (function () {
+        const btn = document.getElementById('mobile-menu-toggle');
+        const menu = document.getElementById('header-actions');
+        if (!btn || !menu) return;
+        btn.addEventListener('click', () => {
+          const willOpen = menu.classList.contains('hidden');
+          menu.classList.toggle('hidden');
+          btn.setAttribute('aria-expanded', String(willOpen));
+        });
+      })();
+    </script>
+</body>
+</html>

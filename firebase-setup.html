@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firebase Setup - DaxSilog</title>
+    <script src="https://cdn.tailwindcss.com?v=3.3.0"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="min-h-screen bg-gray-100">
+    <div class="container mx-auto px-8 py-12">
+        <div class="glass-container rounded-2xl p-8 mb-6">
+            <div class="flex items-center space-x-3 mb-6">
+                <div class="w-12 h-12 bg-gray-800 rounded-xl flex items-center justify-center shadow-lg">
+                    <span class="text-white font-bold text-lg">FB</span>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">
+                        Firebase Setup
+                    </h1>
+                    <p class="text-sm text-gray-600 font-medium">For DaxSilog POS System</p>
+                </div>
+            </div>
+            
+            <div class="mb-8">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">Security Rules Setup</h2>
+                
+                <div class="bg-amber-50 p-4 rounded-lg mb-6 border border-amber-200">
+                    <div class="flex items-start">
+                        <div class="mt-1 mr-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-amber-800">Important: Update Your Firebase Security Rules</h3>
+                            <p class="text-sm text-amber-700 mt-1">
+                                To fix the "Missing or insufficient permissions" error, you need to update your Firebase security rules.
+                                A file called <code class="bg-amber-100 px-1 rounded">firestore.rules</code> has been created with the proper security rules.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="font-semibold text-gray-800 mb-2">Steps to Update Security Rules:</h3>
+                        <ol class="list-decimal list-inside space-y-3 text-gray-700">
+                            <li>
+                                <span class="font-medium">Go to Firebase Console</span>
+                                <p class="ml-6 text-sm text-gray-600">Visit <a href="https://console.firebase.google.com/" class="text-blue-600 underline" target="_blank">console.firebase.google.com</a> and select your project</p>
+                            </li>
+                            <li>
+                                <span class="font-medium">Navigate to Firestore Database</span>
+                                <p class="ml-6 text-sm text-gray-600">Click on "Firestore Database" in the left menu</p>
+                            </li>
+                            <li>
+                                <span class="font-medium">Go to Rules Tab</span>
+                                <p class="ml-6 text-sm text-gray-600">Click on the "Rules" tab at the top</p>
+                            </li>
+                            <li>
+                                <span class="font-medium">Copy Rules from firestore.rules</span>
+                                <p class="ml-6 text-sm text-gray-600">Open the <code class="bg-gray-100 px-1 rounded">firestore.rules</code> file in your project and copy its contents</p>
+                            </li>
+                            <li>
+                                <span class="font-medium">Replace Existing Rules</span>
+                                <p class="ml-6 text-sm text-gray-600">Replace all the content in the Firebase Rules editor with the copied rules</p>
+                            </li>
+                            <li>
+                                <span class="font-medium">Publish Rules</span>
+                                <p class="ml-6 text-sm text-gray-600">Click "Publish" to apply the new security rules</p>
+                            </li>
+                        </ol>
+                    </div>
+                    
+                    <div class="bg-gray-50 p-4 border border-gray-200 rounded-lg">
+                        <h4 class="font-semibold mb-2">What do these rules do?</h4>
+                        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+                            <li>Allow reading items without authentication</li>
+                            <li>Require authentication for creating, updating, and deleting items</li>
+                            <li>Add proper permissions for queue operations</li>
+                            <li>Ensure sales data integrity</li>
+                            <li>Validate data structure for security</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-6 border-t border-gray-200 pt-6">
+                <div class="flex justify-between items-center">
+                    <a href="index.html" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-sm transition-all duration-200 shadow-sm border border-gray-300">
+                        Back to POS
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
