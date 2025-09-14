@@ -452,21 +452,21 @@ header.glass-container {
     grid-template-columns: 1fr !important;
   }
 
-  /* Turn cards into horizontal rows */
+  /* Turn cards into vertical stacks: title above price */
   .item-card {
     display: flex;
-    flex-direction: row;
-    align-items: center;
+    flex-direction: column; /* was row */
+    align-items: stretch;   /* stretch to full width */
     padding: 12px 14px;
   }
 
-  /* Use the existing body wrapper as a row: title left, price right */
+  /* Inner body wrapper: stack title then price */
   .item-card > .flex-1 {
     display: flex !important;
-    flex-direction: row !important;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    flex-direction: column !important; /* was row */
+    align-items: stretch;
+    justify-content: flex-start; /* no space-between */
+    gap: 8px; /* tighter vertical spacing */
     width: 100%;
   }
 
@@ -477,16 +477,18 @@ header.glass-container {
     font-size: 15px;
   }
 
-  /* Compact price badge size on mobile */
+  /* Price badge full-width on small screens */
   .item-card .price-badge {
-    width: auto;
-    min-width: 72px;
-    padding: 8px 14px;
+    display: block;    /* ensure block for width:100% */
+    width: 100%;       /* full width as requested */
+    min-width: 0;      /* remove min-width constraint */
+    padding: 8px 14px; /* keep padding */
+    text-align: center;
   }
 }
 
 /* ---- Mobile compact layouts ---- */
-/* Very small phones: single-column compact row list */
+/* Very small phones: single-column compact vertical list */
 @media (max-width: 360px) {
   #menu-items-container,
   #addons-items-container {
@@ -494,16 +496,16 @@ header.glass-container {
   }
   .item-card {
     display: flex;
-    flex-direction: row;
-    align-items: center;
+    flex-direction: column; /* was row */
+    align-items: stretch;
     padding: 12px 14px;
   }
   .item-card > .flex-1 {
     display: flex !important;
-    flex-direction: row !important;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    flex-direction: column !important; /* was row */
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 8px;
     width: 100%;
   }
   .item-card .item-title {
@@ -514,9 +516,11 @@ header.glass-container {
     line-clamp: 1;
   }
   .item-card .price-badge {
-    width: auto;
-    min-width: 72px;
+    display: block;
+    width: 100%; /* full-width price */
+    min-width: 0;
     padding: 8px 14px;
+    text-align: center;
   }
 }
 
@@ -530,7 +534,7 @@ header.glass-container {
   /* Keep images hidden on small screens for consistency */
   .item-card .w-full.h-24 { display: none; }
 
-  /* Vertical card with anchored price at bottom */
+  /* Vertical card with name above price */
   .item-card {
     display: flex;
     flex-direction: column;
@@ -541,13 +545,21 @@ header.glass-container {
     display: flex !important;
     flex-direction: column !important;
     align-items: stretch;
+    gap: 8px;
   }
   /* Allow up to 2 lines for longer names and keep consistent height */
   .item-card .item-title {
     -webkit-line-clamp: 2;
     line-clamp: 2;
     min-height: 2.8em; /* ~2 lines */
-    margin-bottom: 8px;
+    margin-bottom: 0; /* spacing handled by gap */
+  }
+  /* Ensure full-width price badge here too */
+  .item-card .price-badge {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    text-align: center;
   }
 }
 
@@ -859,79 +871,9 @@ header.glass-container {
     100% { opacity: 0.5; }
 }
 
-/* ---- Show thumbnails on small screens and keep alignment ---- */
-.item-card .item-thumb { display: block; }
-
-@media (max-width: 360px) {
-  #menu-items-container,
-  #addons-items-container {
-    grid-template-columns: 1fr !important;
-  }
-  /* Horizontal row with thumbnail on the left */
-  .item-card {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 14px;
-  }
-  .item-card .item-thumb {
-    display: block; /* ensure visible on very small phones */
-    width: 64px;
-    height: 64px;
-    min-width: 64px;
-    border-radius: 12px;
-    margin: 0; /* remove bottom margin in horizontal layout */
-  }
-  .item-card > .flex-1 {
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    width: 100%;
-  }
-  .item-card .item-title {
-    min-height: 0;
-    margin: 0;
-    font-size: 15px;
-    -webkit-line-clamp: 1;
-    line-clamp: 1;
-  }
-  .item-card .price-badge {
-    width: auto;
-    min-width: 72px;
-    padding: 8px 14px;
-  }
-}
-
-@media (min-width: 361px) and (max-width: 640px) {
-  #menu-items-container,
-  #addons-items-container {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 12px;
-  }
-  /* Vertical cards with visible thumbnails */
-  .item-card .item-thumb {
-    display: block; /* override any earlier hide */
-    height: 88px; /* slightly taller for clarity */
-    margin-bottom: 10px;
-  }
-  .item-card {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    padding: 12px;
-  }
-  .item-card > .flex-1 {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: stretch;
-  }
-  .item-card .item-title {
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    min-height: 2.8em;
-    margin-bottom: 8px;
-  }
+/* --- Hide thumbnails on small screens per request --- */
+@media (max-width: 640px) {
+  /* Force-hide the thumbnail wrapper and any legacy image blocks */
+  .item-card .item-thumb { display: none !important; }
+  .item-card .w-full.h-24 { display: none !important; }
 }
