@@ -877,3 +877,18 @@ header.glass-container {
   .item-card .item-thumb { display: none !important; }
   .item-card .w-full.h-24 { display: none !important; }
 }
+
+/* Receipt modal sizing on small screens */
+@media (max-width: 640px) {
+  #receipt-modal .glass-container {
+    width: 92vw;          /* don’t span full width */
+    max-width: 92vw;      /* override w-full */
+    max-height: 85vh;     /* keep some breathing room */
+    overflow-y: auto;     /* scroll if tall */
+    padding: 16px;        /* tighter padding on mobile */
+  }
+  #receipt-modal #receipt-content {
+    max-height: 65vh;     /* inner scroll area */
+    overflow-y: auto;
+  }
+}

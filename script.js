@@ -609,10 +609,9 @@ function generateReceipt(paymentMethod = 'cash', paymentDetails = {}) {
     receiptDetails.dataset.attendant = attendantName;
     receiptDetails.dataset.paymentMethod = paymentMethod;
     
+    // Header: remove big title/tagline, keep date, receipt #, attendant
     let receiptHTML = `
         <div class="text-center border-b border-gray-300 pb-3 mb-3">
-            <h3 class="font-bold text-lg">Silog Point of Sale</h3>
-            <p class="text-sm text-gray-600">Restaurant Management System</p>
             <p class="text-xs text-gray-500">${now.toLocaleString()}</p>
             <p class="text-xs text-gray-500">Receipt #: ${receiptNumber}</p>
             <p class="text-xs text-gray-500">Attendant: ${attendantName}</p>
@@ -633,7 +632,7 @@ function generateReceipt(paymentMethod = 'cash', paymentDetails = {}) {
         `;
     });
     
-    // Add payment method specific details
+    // Totals and payment info
     receiptHTML += `
         </div>
         
@@ -674,13 +673,8 @@ function generateReceipt(paymentMethod = 'cash', paymentDetails = {}) {
         `;
     }
     
+    // Close totals section (no footer messages)
     receiptHTML += `
-        </div>
-        
-        <div class="text-center mt-4 pt-3 border-t border-gray-300">
-            <p class="text-xs text-gray-500">Thank you for your business!</p>
-            <p class="text-xs text-gray-500">Please come again!</p>
-            <p class="text-xs font-medium mt-2">Served by: ${attendantName}</p>
         </div>
     `;
     receiptDetails.innerHTML = receiptHTML;
@@ -909,7 +903,10 @@ async function deleteItem(itemId, type) {
         renderEditableItems();
     } catch (err) {
         console.error('Failed to delete item', err);
-        alert('Failed to delete item');
+        const msg = (err && err.code === 'permission-denied')
+          ? 'Failed to delete item: permission denied. Please sign in and ensure Firestore rules allow updating isActive/deletedAt.'
+          : (err && err.message) || 'Failed to delete item';
+        alert(msg);
     }
 }
 

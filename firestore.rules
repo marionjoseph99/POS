@@ -15,7 +15,7 @@ service cloud.firestore {
     
     // Item validation function
     function isItem(data) {
-      return data.keys().hasOnly(['id','name','price','type','isActive','createdAt'])
+      return data.keys().hasOnly(['id','name','price','type','isActive','createdAt','deletedAt'])
         && data.id is number
         && data.name is string
         && data.name.size() > 0
@@ -23,7 +23,8 @@ service cloud.firestore {
         && data.price >= 0
         && (data.type in ['menu','addon'])
         && (!('isActive' in data) || data.isActive is bool)
-        && (!('createdAt' in data) || data.createdAt is timestamp);
+        && (!('createdAt' in data) || data.createdAt is timestamp)
+        && (!('deletedAt' in data) || data.deletedAt is timestamp);
     }
     
     // Queue validation function
