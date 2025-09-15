@@ -262,17 +262,54 @@
         </div>
     </div>
 
+    <!-- Custom Alert Modal -->
+    <div id="custom-alert-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60] hidden">
+        <div class="bg-white rounded-xl p-4 w-full max-w-sm transform transition-transform scale-95 md:scale-100 shadow-xl">
+            <div class="flex items-center mb-3">
+                <div id="alert-icon" class="w-8 h-8 rounded-full flex items-center justify-center mr-3">
+                    <!-- Icon will be inserted here -->
+                </div>
+                <h3 id="alert-title" class="text-base font-semibold text-gray-800">Alert</h3>
+            </div>
+            <div id="alert-message" class="text-gray-600 mb-4 text-sm">
+                <!-- Message will be inserted here -->
+            </div>
+            <div id="alert-buttons" class="flex space-x-2 justify-end">
+                <!-- Buttons will be inserted here -->
+            </div>
+        </div>
+    </div>
+
     <!-- Receipt Modal -->
     <div id="receipt-modal" class="fixed inset-0 modal-backdrop flex items-center justify-center p-4 z-50 hidden">
-        <div class="glass-container rounded-2xl p-8 w-full max-w-md transform transition-transform scale-95 md:scale-100">
+        <div class="glass-container rounded-2xl p-8 w-full max-w-md transform transition-transform scale-95 md:scale-100 relative">
+            <!-- Save and Print buttons in top right corner -->
+            <div class="absolute top-4 right-4 flex space-x-2">
+                <button id="save-receipt-btn" class="bg-green-600 hover:bg-green-700 text-white text-xs font-medium py-2 px-3 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md">
+                    Save PNG
+                </button>
+                <button id="print-receipt-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium py-2 px-3 rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md">
+                    Print
+                </button>
+            </div>
+            
             <div id="receipt-content">
                 <div id="receipt-details" class="bg-gray-50 rounded-xl p-4 mb-6 border-2 border-dashed border-gray-300">
                     <!-- Receipt content will be generated here -->
                 </div>
             </div>
             
-            <div class="flex space-x-3">
-                <!-- Removed Add to Queue button; Close is now full-width -->
+            <div class="space-y-3">
+                <!-- Cancel and Edit Order buttons -->
+                <div class="flex space-x-3">
+                    <button id="cancel-order-btn" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-xl transition-colors duration-200 shadow-md hover:shadow-lg">
+                        Cancel Order
+                    </button>
+                    <button id="edit-order-btn" class="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 px-4 rounded-xl transition-colors duration-200 shadow-md hover:shadow-lg">
+                        Edit Order
+                    </button>
+                </div>
+                <!-- Close button -->
                 <button id="close-receipt-btn" class="w-full btn-primary">
                     Close Receipt
                 </button>

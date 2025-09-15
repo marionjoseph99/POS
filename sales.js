@@ -31,7 +31,10 @@ try {
         console.log("Initialized Firebase app with name 'salesApp'");
     } catch (e) {
         console.error("Fatal Firebase initialization error:", e);
-        alert("Could not initialize Firebase. Check console for details.");
+        // Custom alert will be available after DOM loads
+        document.addEventListener('DOMContentLoaded', async () => {
+            await customAlert("Could not initialize Firebase. Check console for details.", 'Firebase Error', 'error');
+        });
     }
 }
 
@@ -48,6 +51,144 @@ try {
         });
     }
 } catch (_) { /* no-op */ }
+
+// Custom Modal System for Sales Page
+class CustomModal {
+    constructor() {
+        this.modal = null;
+        this.title = null;
+        this.message = null;
+        this.icon = null;
+        this.buttons = null;
+        this.initialized = false;
+    }
+
+    init() {
+        if (this.initialized) return;
+        this.modal = document.getElementById('custom-alert-modal');
+        this.title = document.getElementById('alert-title');
+        this.message = document.getElementById('alert-message');
+        this.icon = document.getElementById('alert-icon');
+        this.buttons = document.getElementById('alert-buttons');
+        this.initialized = true;
+    }
+
+    show(options) {
+        this.init();
+        if (!this.modal) return Promise.resolve(true);
+
+        return new Promise((resolve) => {
+            const {
+                title = 'Alert',
+                message = '',
+                type = 'info',
+                confirmText = 'OK',
+                cancelText = 'Cancel',
+                showCancel = false
+            } = options;
+
+            this.title.textContent = title;
+            this.message.textContent = message;
+            this.setIcon(type);
+            this.buttons.innerHTML = '';
+
+            if (showCancel) {
+                const cancelBtn = document.createElement('button');
+                cancelBtn.textContent = cancelText;
+                cancelBtn.className = 'px-3 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition-colors duration-200 text-sm';
+                cancelBtn.onclick = () => {
+                    this.hide();
+                    resolve(false);
+                };
+                this.buttons.appendChild(cancelBtn);
+            }
+
+            const confirmBtn = document.createElement('button');
+            confirmBtn.textContent = confirmText;
+            confirmBtn.className = this.getButtonClass(type);
+            confirmBtn.onclick = () => {
+                this.hide();
+                resolve(true);
+            };
+            this.buttons.appendChild(confirmBtn);
+
+            this.modal.classList.remove('hidden');
+            setTimeout(() => confirmBtn.focus(), 100);
+
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    document.removeEventListener('keydown', handleEscape);
+                    this.hide();
+                    resolve(false);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
+        });
+    }
+
+    hide() {
+        if (this.modal) {
+            this.modal.classList.add('hidden');
+        }
+    }
+
+    setIcon(type) {
+        if (!this.icon) return;
+        this.icon.innerHTML = '';
+        this.icon.className = 'w-8 h-8 rounded-full flex items-center justify-center mr-3';
+
+        let iconHTML = '';
+        let bgClass = '';
+
+        switch (type) {
+            case 'success':
+                bgClass = 'bg-green-100';
+                iconHTML = '<svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
+                break;
+            case 'error':
+                bgClass = 'bg-red-100';
+                iconHTML = '<svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
+                break;
+            case 'warning':
+                bgClass = 'bg-yellow-100';
+                iconHTML = '<svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path></svg>';
+                break;
+            default:
+                bgClass = 'bg-blue-100';
+                iconHTML = '<svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>';
+        }
+
+        this.icon.className += ' ' + bgClass;
+        this.icon.innerHTML = iconHTML;
+    }
+
+    getButtonClass(type) {
+        const baseClass = 'px-3 py-2 rounded-lg font-medium transition-colors duration-200 text-sm';
+        switch (type) {
+            case 'success':
+                return `${baseClass} bg-green-600 hover:bg-green-700 text-white`;
+            case 'error':
+                return `${baseClass} bg-red-600 hover:bg-red-700 text-white`;
+            case 'warning':
+                return `${baseClass} bg-yellow-600 hover:bg-yellow-700 text-white`;
+            default:
+                return `${baseClass} bg-gray-600 hover:bg-gray-700 text-white`;
+        }
+    }
+}
+
+// Create global modal instance
+const customModal = new CustomModal();
+
+// Custom alert function
+window.customAlert = async function(message, title = 'Alert', type = 'info') {
+    return await customModal.show({
+        title,
+        message,
+        type,
+        confirmText: 'OK'
+    });
+};
 
 // DOM elements
 const dateFromInput = document.getElementById('date-from');

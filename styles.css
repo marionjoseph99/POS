@@ -395,7 +395,7 @@ header.glass-container {
     }
 
     .section-header {
-        font-size: 16px;
+        font-size: 14px; /* Reduced from 16px */
         padding: 8px 12px;
         margin-bottom: 16px;
     }
@@ -405,42 +405,80 @@ header.glass-container {
         padding: 8px;
     }
     
+    /* Item title font size */
+    .item-card .item-title {
+        font-size: 13px; /* Smaller font for mobile */
+        font-weight: 600;
+    }
+    
+    /* Price badge font size */
+    .price-badge {
+        font-size: 12px; /* Smaller price text */
+        padding: 6px 12px;
+    }
+    
     /* Previously hid images on mobile; now allow thumbnails. Only hide non-thumb legacy images */
     .item-card .w-full.h-24:not(.item-thumb) {
         display: none;
     }
     
     .btn-primary, .btn-secondary {
-        padding: 14px 20px;
-        font-size: 16px;
+        padding: 12px 18px; /* Reduced padding */
+        font-size: 14px; /* Smaller button text */
         border-radius: 12px;
     }
     
     .form-input {
-        padding: 14px 16px;
-        font-size: 16px;
+        padding: 12px 14px; /* Reduced padding */
+        font-size: 14px; /* Smaller input text */
     }
     
     .order-table td {
-        padding: 12px 6px;
-        font-size: 14px;
+        padding: 10px 4px; /* Reduced padding */
+        font-size: 12px; /* Smaller table text */
+    }
+    
+    .order-table th {
+        font-size: 11px; /* Smaller header text */
+        padding: 10px 4px;
     }
     
     .qty-btn {
-        width: 36px;
-        height: 36px;
-        font-size: 18px;
+        width: 32px; /* Reduced from 36px */
+        height: 32px;
+        font-size: 16px; /* Smaller qty button text */
     }
     
     /* Payment method button mobile optimizations */
     .payment-method-btn {
-        padding: 14px 10px;
-        font-size: 14px;
+        padding: 12px 8px; /* Reduced padding */
+        font-size: 13px; /* Smaller text */
     }
     
     .payment-method-btn svg {
-        height: 18px;
-        width: 18px;
+        height: 16px; /* Smaller icons */
+        width: 16px;
+    }
+    
+    /* Header navigation links */
+    header a, header button {
+        font-size: 12px !important; /* Smaller navigation text */
+        padding: 8px 12px !important;
+    }
+    
+    /* Total amount display */
+    #total-amount {
+        font-size: 20px !important; /* Reduced from larger size */
+    }
+    
+    /* Change amount display */
+    #change-amount {
+        font-size: 18px !important;
+    }
+    
+    /* Order count badge */
+    #order-count {
+        font-size: 12px;
     }
 }
 
