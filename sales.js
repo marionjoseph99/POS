@@ -65,8 +65,13 @@ const receiptViewNumber = document.getElementById('receipt-view-number');
 let salesChart;
 // Track active real-time subscription
 let unsubscribeSales = null;
+let unsubscribeOrders = null;
 // Debounce timer for chart updates to avoid thrashing on rapid snapshots
 let chartUpdateTimer = null;
+// Orders status map by receiptNumber
+let ordersStatusByReceipt = new Map();
+// Last sales snapshot cached for re-rendering when status changes
+let latestSalesData = [];
 
 // Network status monitoring
 function updateNetworkStatus() {
@@ -162,7 +167,6 @@ function setupEventListeners() {
 
     // Export sales
     exportSalesBtn.addEventListener('click', exportSalesData);
-    
 
     // View receipt buttons
     document.querySelectorAll('.view-receipt-btn').forEach(button => {
@@ -185,6 +189,10 @@ function setupEventListeners() {
         if (typeof unsubscribeSales === 'function') {
             unsubscribeSales();
             unsubscribeSales = null;
+        }
+        if (typeof unsubscribeOrders === 'function') {
+            unsubscribeOrders();
+            unsubscribeOrders = null;
         }
     });
 }
@@ -256,22 +264,16 @@ function initializeSalesChart() {
 // Update sales chart with new data
 function updateSalesChart(salesData = []) {
     const { from: fromDate, to: toDate } = getDateRange();
-    
     // Show loading indicator and hide other elements
     const chartLoading = document.getElementById('chart-loading');
     const chartEmpty = document.getElementById('chart-empty');
     const salesChartCanvas = document.getElementById('sales-chart');
-    
     if (chartLoading) chartLoading.classList.remove('hidden');
     if (chartEmpty) chartEmpty.classList.add('hidden');
     if (salesChartCanvas) salesChartCanvas.classList.add('hidden');
-
-    // Generate date labels
     const labels = [];
     const data = [];
-
     const dailySales = new Map();
-    
     let currentDate = new Date(fromDate);
     while (currentDate <= toDate) {
         const dateStr = currentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -281,37 +283,34 @@ function updateSalesChart(salesData = []) {
         nextDate.setDate(currentDate.getDate() + 1);
         currentDate = nextDate;
     }
-    
     salesData.forEach(sale => {
         if (sale.timestamp) {
             const saleDate = new Date(sale.timestamp.seconds ? sale.timestamp.seconds * 1000 : sale.timestamp);
             const dateStr = saleDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             if (dailySales.has(dateStr)) {
+                // Exclude cancelled from chart totals
+                if (getSaleStatus(sale) === 'cancelled') return;
                 dailySales.set(dateStr, dailySales.get(dateStr) + (sale.total || 0));
             }
         }
     });
-    
     labels.forEach(label => data.push(dailySales.get(label)));
-    
     const hasRealData = data.some(value => value > 0);
     if (!hasRealData) {
         if (chartLoading) chartLoading.classList.add('hidden');
         if (chartEmpty) chartEmpty.classList.remove('hidden');
         if (salesChartCanvas) salesChartCanvas.classList.add('hidden');
-        return; // do not fabricate data
+        return;
     }
-
     if (chartLoading) chartLoading.classList.add('hidden');
     if (chartEmpty) chartEmpty.classList.add('hidden');
     if (salesChartCanvas) salesChartCanvas.classList.remove('hidden');
-
     salesChart.data.labels = labels;
     salesChart.data.datasets[0].data = data;
     salesChart.update();
 }
 
-// Render sales table with data
+// Render sales table with data (now includes Status column)
 function renderSalesTable(salesData) {
     const tableBody = document.getElementById('sales-table-body');
     if (!tableBody) return;
@@ -319,7 +318,7 @@ function renderSalesTable(salesData) {
     tableBody.innerHTML = '';
     
     if (salesData.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-gray-500">No sales data found for the selected period.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="8" class="px-6 py-4 text-center text-gray-500">No sales data found for the selected period.</td></tr>';
         const paginationInfo = document.getElementById('sales-pagination-info');
         if (paginationInfo) paginationInfo.textContent = 'Showing 0 of 0 sales';
         return;
@@ -355,6 +354,8 @@ function renderSalesTable(salesData) {
             '<span class="px-2 py-1 bg-green-50 text-green-700 rounded-md text-xs font-medium">GCash</span>' :
             '<span class="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-xs font-medium">Cash</span>';
         
+        const statusHtml = statusBadgeHtml(getSaleStatus(sale));
+        
         row.innerHTML = `
             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800">${sale.receiptNumber || sale.id}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${formattedDate}</td>
@@ -363,6 +364,7 @@ function renderSalesTable(salesData) {
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                 ${paymentMethodHtml}
             </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm">${statusHtml}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-gray-800">₱${sale.total?.toFixed(2) || '0.00'}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-center">
                 <button class="view-receipt-btn text-blue-600 hover:text-blue-800" data-receipt="${sale.id}">View</button>
@@ -388,9 +390,13 @@ function renderSalesTable(salesData) {
     }
 }
 
-// Update sales summary with data
+// Update sales summary with data (subtract cancelled from Total Sales)
 function updateSalesSummary(salesData) {
-    const totalSales = salesData.reduce((sum, sale) => sum + (sale.total || 0), 0);
+    const totalSales = salesData.reduce((sum, sale) => {
+        const s = getSaleStatus(sale);
+        if (s === 'cancelled') return sum; // exclude cancelled from revenue
+        return sum + (sale.total || 0);
+    }, 0);
     document.getElementById('total-sales-value').textContent = `₱${totalSales.toFixed(2)}`;
     document.getElementById('total-orders-value').textContent = salesData.length.toString();
     const avgOrder = salesData.length > 0 ? totalSales / salesData.length : 0;
@@ -488,16 +494,72 @@ function getDateRange() {
     return { from, to };
 }
 
+// Status helpers and Orders subscription to derive sale status
+function statusBadgeHtml(raw) {
+    const s = (raw || '').toLowerCase();
+    const label = s === 'cooking' ? 'Preparing' : s === 'waiting' ? 'Waiting' : s === 'ready' ? 'Ready' : s === 'served' ? 'Served' : s === 'cancelled' ? 'Cancelled' : '-';
+    const cls = s === 'served' ? 'bg-green-50 text-green-700 border-green-300' :
+               s === 'ready' ? 'bg-amber-50 text-amber-700 border-amber-300' :
+               s === 'cooking' ? 'bg-blue-50 text-blue-700 border-blue-300' :
+               s === 'waiting' ? 'bg-gray-50 text-gray-700 border-gray-300' :
+               s === 'cancelled' ? 'bg-red-50 text-red-700 border-red-300' : 'bg-gray-50 text-gray-500 border-gray-200';
+    return `<span class="px-2 py-1 rounded-md text-xs font-medium border ${cls}">${label}</span>`;
+}
+function getSaleStatus(sale) {
+    const direct = (sale && sale.status) ? String(sale.status).toLowerCase() : '';
+    let s = direct;
+    if (!s) {
+        const rn = sale && sale.receiptNumber ? String(sale.receiptNumber) : '';
+        if (rn && ordersStatusByReceipt.has(rn)) s = (ordersStatusByReceipt.get(rn) || '').toLowerCase();
+    }
+    // normalize US/UK spelling
+    if (s === 'canceled') s = 'cancelled';
+    return s;
+}
+function subscribeOrdersStatus(fromDate, toDate) {
+    if (typeof unsubscribeOrders === 'function') {
+        unsubscribeOrders();
+        unsubscribeOrders = null;
+    }
+    try {
+        const ordersQueryRef = query(
+            collection(db, 'orders'),
+            where('timestamp', '>=', fromDate),
+            where('timestamp', '<=', toDate),
+            orderBy('timestamp', 'desc'),
+            limit(200)
+        );
+        unsubscribeOrders = onSnapshot(ordersQueryRef, (snapshot) => {
+            const m = new Map();
+            snapshot.forEach(docSnap => {
+                const data = docSnap.data() || {};
+                const rn = data.receiptNumber;
+                if (rn) m.set(rn, data.status || '');
+            });
+            ordersStatusByReceipt = m;
+            if (latestSalesData && latestSalesData.length) {
+                renderSalesTable(latestSalesData);
+                updateSalesSummary(latestSalesData);
+            }
+        }, (err) => {
+            console.error('Orders status subscription failed:', err);
+        });
+    } catch (e) {
+        console.error('Failed to subscribe to orders status:', e);
+    }
+}
+
 // Load sales data from Firebase (real-time)
 async function loadSalesData() {
     try {
         const { from: fromDate, to: toDate } = getDateRange();
+
         // Reset table to loading state
         const tableSalesBody = document.getElementById('sales-table-body');
         if (tableSalesBody) {
             tableSalesBody.innerHTML = `
                 <tr>
-                    <td colspan="7" class="px-6 py-6 text-center text-gray-500">
+                    <td colspan="8" class="px-6 py-6 text-center text-gray-500">
                         <div id="sales-loading" class="py-4">
                             <div class="inline-block animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-gray-900"></div>
                             <p class="mt-2 text-gray-600">Loading sales data...</p>
@@ -534,6 +596,9 @@ async function loadSalesData() {
             unsubscribeSales = null;
         }
 
+        // Subscribe to orders status for this range
+        subscribeOrdersStatus(fromDate, toDate);
+
         // Build query and subscribe in real-time
         const salesQuery = query(
             collection(db, "sales"),
@@ -554,6 +619,7 @@ async function loadSalesData() {
         unsubscribeSales = onSnapshot(salesQuery, (snapshot) => {
             const salesData = [];
             snapshot.forEach((d) => salesData.push({ id: d.id, ...d.data() }));
+            latestSalesData = salesData;
 
             // Render strictly from DB snapshot
             renderSalesTable(salesData);
@@ -571,7 +637,7 @@ async function loadSalesData() {
                     if (chartEmpty) chartEmpty.classList.remove('hidden');
                     if (salesChartCanvas) salesChartCanvas.classList.add('hidden');
                     if (tableSalesBody) {
-                        tableSalesBody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-gray-500">No sales data found for the selected period.</td></tr>';
+                        tableSalesBody.innerHTML = '<tr><td colspan="8" class="px-6 py-4 text-center text-gray-500">No sales data found for the selected period.</td></tr>';
                     }
                 } else {
                     if (chartEmpty) chartEmpty.classList.add('hidden');
@@ -582,14 +648,31 @@ async function loadSalesData() {
             console.error("Error subscribing to sales data:", error);
             // Attempt one-time fetch on error
             loadSalesDataOnce(fromDate, toDate);
-            // ...existing error handling...
+            const errorTableBody = document.getElementById('sales-table-body');
+            if (errorTableBody) {
+                errorTableBody.innerHTML = '<tr><td colspan="8" class="px-6 py-4 text-center text-gray-500">Failed to load sales data. Please try again.</td></tr>';
+            }
+            if (chartLoading) chartLoading.classList.add('hidden');
+            if (chartEmpty) chartEmpty.classList.remove('hidden');
+            if (salesChartCanvas) salesChartCanvas.classList.add('hidden');
+            if (topProductsContainer) {
+                topProductsContainer.innerHTML = `
+                    <div class="p-6 text-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-gray-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                        </svg>
+                        <p class="text-gray-500">No products sold yet</p>
+                        <p class="text-gray-400 text-sm mt-1">Complete sales to see top products</p>
+                    </div>
+                `;
+            }
         });
 
     } catch (error) {
         console.error("Error loading sales data:", error);
         const errorTableBody = document.getElementById('sales-table-body');
         if (errorTableBody) {
-            errorTableBody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-gray-500">Failed to load sales data. Please try again.</td></tr>';
+            errorTableBody.innerHTML = '<tr><td colspan="8" class="px-6 py-4 text-center text-gray-500">Failed to load sales data. Please try again.</td></tr>';
         }
         const chartLoading = document.getElementById('chart-loading');
         const chartEmpty = document.getElementById('chart-empty');
@@ -630,6 +713,7 @@ async function loadSalesDataOnce(fromDate, toDate) {
         const snap = await getDocs(salesQueryRef);
         const salesData = [];
         snap.forEach(d => salesData.push({ id: d.id, ...d.data() }));
+        latestSalesData = salesData;
 
         renderSalesTable(salesData);
         updateSalesSummary(salesData);
@@ -745,9 +829,7 @@ async function viewReceiptDetails(receiptId, saleData = null) {
     }
 
     // Close totals section (no footer messages)
-    receiptHTML += `
-        </div>
-    `;
+    receiptHTML += `</div>`;
     
     receiptViewDetails.innerHTML = receiptHTML;
     receiptViewModal.classList.remove('hidden');
@@ -820,8 +902,8 @@ function exportSalesData() {
     const { from: fromDateTime, to: toDateTime } = getDateRange();
     showNotification("Preparing sales data for export...");
 
-    // Use date only in CSV
-    const csvHeader = ['Receipt #', 'Date', 'Items', 'Quantity', 'Price per Item', 'Subtotal', 'Payment Method', 'Attendant', 'Total'];
+    // Add Status column to CSV
+    const csvHeader = ['Receipt #', 'Date', 'Items', 'Quantity', 'Price per Item', 'Subtotal', 'Payment Method', 'Status', 'Attendant', 'Total'];
 
     (async () => {
         try {
@@ -847,6 +929,7 @@ function exportSalesData() {
                 // Local date YYYY-MM-DD (no time)
                 const formattedDate = `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')}`;
                 const receiptId = sale.receiptNumber || sale.id || '';
+                const statusText = statusLabel(getSaleStatus(sale));
                 if (Array.isArray(sale.items) && sale.items.length > 0) {
                     sale.items.forEach((item, idx) => {
                         const subtotal = Number(item.price || 0) * Number(item.quantity || 1);
@@ -858,6 +941,7 @@ function exportSalesData() {
                             Number(item.price || 0).toFixed(2),
                             subtotal.toFixed(2),
                             idx === 0 ? (sale.paymentMethod || 'cash') + ' ' : '',
+                            idx === 0 ? statusText : '',
                             idx === 0 ? escapeCsvValue(sale.cashier || sale.attendant || 'N/A') : '',
                             idx === 0 ? Number(sale.total || 0).toFixed(2) : ''
                         ]);
@@ -871,6 +955,7 @@ function exportSalesData() {
                         Number(sale.total || 0).toFixed(2),
                         Number(sale.total || 0).toFixed(2),
                         (sale.paymentMethod || 'cash') + ' ',
+                        statusText,
                         escapeCsvValue(sale.cashier || sale.attendant || 'N/A'),
                         Number(sale.total || 0).toFixed(2)
                     ]);
@@ -882,67 +967,68 @@ function exportSalesData() {
             csvData.forEach(row => { csvContent += row.join(',') + '\r\n'; });
 
             const encodedUri = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
+            const fromDateStr = formatLocalDate(fromDateTime);
+            const toDateStr = formatLocalDate(toDateTime);
             const link = document.createElement('a');
             link.setAttribute('href', encodedUri);
-            link.setAttribute('download', `DaxSilog_Sales_${fromDate}_to_${toDate}.csv`);
+            link.setAttribute('download', `DaxSilog_Sales_${fromDateStr}_to_${toDateStr}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            showNotification("CSV exported.");
+            showNotification("CSV exported.", 'success');
         } catch (error) {
             console.error("Error exporting sales data:", error);
-            showNotification("Failed to export sales data. Please try again.");
+            showNotification("Failed to export sales data. Please try again.", 'error');
         }
     })();
 }
 
 // Helper function to escape CSV values
 function escapeCsvValue(value) {
-    if (value === null || value === undefined) return '';
-    
-    // Convert to string and handle special characters
-    const stringValue = String(value);
-    
-    // If the value contains commas, quotes, or newlines, wrap it in quotes and escape any quotes
-    if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
-        return '"' + stringValue.replace(/"/g, '""') + '"';
+    if (value === undefined || value === null) return '';
+    const str = String(value);
+    if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return '"' + str.replace(/"/g, '""') + '"';
     }
-    
-    return stringValue;
+    return str;
 }
 
-// Helper function to show notifications
-function showNotification(message) {
-    // Check if notification container exists, if not create it
-    let notifContainer = document.getElementById('notification-container');
-    
-    if (!notifContainer) {
-        notifContainer = document.createElement('div');
-        notifContainer.id = 'notification-container';
-        notifContainer.className = 'fixed bottom-6 right-6 z-50 flex flex-col-reverse space-y-reverse space-y-2';
-        document.body.appendChild(notifContainer);
+// Lightweight toast notification helper
+function showNotification(message, type = 'info') {
+    try {
+        let container = document.getElementById('toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toast-container';
+            container.style.position = 'fixed';
+            container.style.bottom = '20px';
+            container.style.right = '20px';
+            container.style.zIndex = '9999';
+            container.style.display = 'flex';
+            container.style.flexDirection = 'column';
+            container.style.gap = '8px';
+            document.body.appendChild(container);
+        }
+        const bg = type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-gray-800';
+        const toast = document.createElement('div');
+        toast.className = `${bg} text-white px-4 py-2 rounded-lg shadow-lg text-sm transition-opacity duration-300`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(() => { toast.style.opacity = '0'; }, 2200);
+        setTimeout(() => { toast.remove(); }, 2600);
+    } catch (_) {
+        // Fallback to alert if DOM is not ready
+        try { alert(message); } catch (_) {}
     }
-    
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.className = 'bg-gray-800 text-white py-2 px-4 rounded-lg shadow-lg transform transition-all duration-500 opacity-0 translate-y-2';
-    notification.textContent = message;
-    
-    // Add to container
-    notifContainer.appendChild(notification);
-    
-    // Trigger animation
-    setTimeout(() => {
-        notification.classList.remove('opacity-0', 'translate-y-2');
-    }, 10);
-    
-    // Remove after delay
-    setTimeout(() => {
-        notification.classList.add('opacity-0', 'translate-y-2');
-        setTimeout(() => {
-            if (notifContainer.contains(notification)) {
-                notifContainer.removeChild(notification);
-            }
-        }, 500);
-    }, 3000);
+}
+
+// Status label helper
+function statusLabel(raw) {
+    const s = (raw || '').toLowerCase();
+    if (s === 'canceled') return 'Cancelled';
+    return s === 'cooking' ? 'Preparing' :
+           s === 'waiting' ? 'Waiting' :
+           s === 'ready' ? 'Ready' :
+           s === 'served' ? 'Served' :
+           s === 'cancelled' ? 'Cancelled' : '';
 }
