@@ -100,6 +100,10 @@ let dailySales = 0; // Will be populated from Firebase
 // Control when inputs should auto-focus to avoid mobile scroll on load
 let allowAutoFocus = false;
 
+// Initialize flags and pending data
+window._orderCancelled = false;
+window._pendingSaleData = null;
+
 // Custom Modal System
 class CustomModal {
     constructor() {
@@ -840,8 +844,8 @@ async function processPayment() {
         salesDisplayEl.textContent = `₱${dailySales.toFixed(2)}`;
     }
 
-    // Prepare sales document to save
-    const baseDoc = {
+    // Store sale data globally for later processing (when receipt is closed)
+    window._pendingSaleData = {
         items: currentOrder.map(item => ({
             id: item.id,
             name: item.name,
@@ -854,22 +858,11 @@ async function processPayment() {
         paymentMethod: paymentMethod,
         cashier: getCurrentUserName() || 'Unknown',
         storeLocation: 'Main Branch',
-        receiptNumber: receiptNumber
+        receiptNumber: receiptNumber,
+        ...(paymentMethod === 'cash' 
+            ? { cashReceived: paymentDetails.cashReceived || 0, change: (paymentDetails.cashReceived || 0) - totalAmount }
+            : { referenceNumber: paymentDetails.referenceNumber || '' })
     };
-    const saleDoc = paymentMethod === 'cash'
-        ? { ...baseDoc, cashReceived: paymentDetails.cashReceived || 0, change: (paymentDetails.cashReceived || 0) - totalAmount }
-        : { ...baseDoc, referenceNumber: paymentDetails.referenceNumber || '' };
-
-    try {
-        await addDoc(collection(db, 'sales'), saleDoc);
-    } catch (error) {
-        console.error('Error saving sales data:', error);
-        queueLocalSale({ ...saleDoc, // fallback timestamp for local record visibility
-            // Use a client timestamp copy for awareness (won't be used by server)
-            clientTimestamp: new Date().toISOString()
-        });
-        await customAlert('Network issue: sale saved locally and will sync when online.', 'Offline Mode', 'warning');
-    }
     
     clearOrder();
     receiptModal.classList.remove('hidden');
@@ -1059,7 +1052,8 @@ async function cancelOrder() {
             editBtn.classList.add('opacity-50', 'cursor-not-allowed');
         }
         
-        await customAlert('Order has been cancelled. It will not be sent to the kitchen.', 'Order Cancelled', 'success');
+        // Close the receipt modal automatically after cancellation
+        closeReceiptModal();
     }
 }
 
@@ -1168,12 +1162,36 @@ async function handleCloseReceipt() {
         // Only add to queue if order wasn't cancelled
         if (!window._orderCancelled) {
             await addCurrentReceiptToQueue();
+            
+            // Save sales data to Firestore only for non-cancelled orders
+            if (window._pendingSaleData) {
+                try {
+                    await addDoc(collection(db, 'sales'), window._pendingSaleData);
+                } catch (error) {
+                    console.error('Error saving sales data:', error);
+                    queueLocalSale({ ...window._pendingSaleData,
+                        // Use a client timestamp copy for awareness (won't be used by server)
+                        clientTimestamp: new Date().toISOString()
+                    });
+                    await customAlert('Network issue: sale saved locally and will sync when online.', 'Offline Mode', 'warning');
+                }
+            }
+        } else {
+            // Order was cancelled - adjust daily sales display
+            if (window._pendingSaleData) {
+                dailySales -= window._pendingSaleData.total;
+                const salesDisplayEl = document.getElementById('today-sales-display');
+                if (salesDisplayEl) {
+                    salesDisplayEl.textContent = `₱${dailySales.toFixed(2)}`;
+                }
+            }
         }
     } catch (e) {
         console.error('Auto actions on close failed', e);
     } finally {
-        // Reset the cancelled flag for next order
+        // Reset flags and clear pending data for next order
         window._orderCancelled = false;
+        window._pendingSaleData = null;
         closeReceiptModal();
     }
 }
